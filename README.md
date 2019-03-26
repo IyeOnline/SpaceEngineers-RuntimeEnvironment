@@ -19,7 +19,7 @@ Dont use it if you dont need any of its features. A simple script checking the s
     * As a subroject. Make sure to not accidentally include the Example as a source. That would be bad. You can just ignore it in VS.
     * By simply adding the source file to your project
 
-4. Take a look at the [example](https://github.com/IyeOnline/SpaceEngineers-RuntimeEnvironment/blob/master/Example.cs) for a quick overview. Check out the [wiki](https://github.com/IyeOnline/SpaceEngineers-RuntimeEnvironment/wiki) for more in depth expalnations
+4. Take a look at the [example](https://github.com/IyeOnline/SpaceEngineers-RuntimeEnvironment/blob/master/Example/Program.cs) for a quick overview. Check out the [wiki](https://github.com/IyeOnline/SpaceEngineers-RuntimeEnvironment/wiki) for more in depth expalnations
 
 # How to use it improperly
 In the case you want to use this, but really dont want to use Malwares amazing development kit, or just dont want to use VS at all, you can still use this framework. 
