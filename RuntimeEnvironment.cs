@@ -20,7 +20,7 @@ namespace IngameScript
 	partial class Program
 	{
 		/// <summary>
-		/// class that allows you to schedule jobs with the runtime. refer to the code example for details
+		/// class that allows you to schedule jobs with the runtime. refer to the code example for details.
 		/// <para>See the Example.cs file for basic information on the usage</para>
 		/// </summary>
 		/// <seealso cref="Job"/>
@@ -36,7 +36,7 @@ namespace IngameScript
 			private int SymbolTick = 0;
 			private int interval = maxinterval;
 			public int CurrentTickrate { get; private set; }
-			private int VirtualTick = 0;
+			private int FastTick = 0;
 
 			public double ContinousTime { get; private set; } = 0;
 			public double TimeSinceLastCall { get; private set; } = 0;
@@ -51,9 +51,15 @@ namespace IngameScript
 			private readonly Dictionary<string, Command> Commands;
 			private readonly UpdateType KnownCommandUpdateTypes;
 
-
 			public MyGridProgram ThisProgram { get; }
 
+			private static readonly Dictionary<int, UpdateFrequency> intervalToFrequency = new Dictionary<int, UpdateFrequency>() {
+				{ 1, UpdateFrequency.Update1 },
+				{ 10, UpdateFrequency.Update10 },
+				{ 100, UpdateFrequency.Update100 }
+			};
+
+			#region classes
 			/// <summary>
 			/// The data structure for a job
 			/// </summary>
@@ -117,7 +123,9 @@ namespace IngameScript
 					UpdateType = _UpdateType;
 				}
 			}
+			#endregion classes
 
+			#region public functions
 			///<summary>
 			///Ctor. call this in your Program Ctor.
 			///</summary>
@@ -134,11 +142,10 @@ namespace IngameScript
 				ThisProgram = _ThisProgram;
 				CurrentTickrate = RateNeededForInterval(interval);
 				EchoState = _EchoState;
-
+				
 				if(EchoState)
 				{ Echo("Creating RuntimeEnvironment..."); }
 				
-
 				Jobs = _Jobs;
 				if (EchoState)
 				{ Echo("registered", Jobs.Count, "jobs"); }
@@ -146,21 +153,19 @@ namespace IngameScript
 				{
 					if( Array.IndexOf( forbiddenJobs, job.Key ) > -1 )
 					{ throw new Exception("forbidden job key \"" + job.Key + "\" encountered."); }
-
+					
 					job.Value.RequeueInterval = SanitizeInterval(job.Value.RequeueInterval);
 					RunningJobs.Add(job.Key, null);
 					if(EchoState)
 					{ Echo("   ", job.Key); }
 				}
-
 				JobNames = Jobs.Keys.ToList();
-
-
+				
 				if( _Commands == null)
 				{ Commands = new Dictionary<string, Command>(); }
 				else
 				{ Commands = _Commands; }
-
+				
 				if(EchoState)
 				{ Echo("registered", Commands.Count, "commands"); }
 				foreach (var command in Commands.Keys)
@@ -171,23 +176,220 @@ namespace IngameScript
 					{ Echo("   ", command); }
 					
 				}
-
-				Commands.Add("toggle", new Command(Command_Toggle) );
+				
+				Commands.Add("toggle", new Command(CMD_toggle) );
 				Commands.Add("run", new Command(CMD_run,1));
 				Commands.Add("frequency", new Command(CMD_freq));
-
+				
 				foreach(var command in Commands.Values)
 				{
 					KnownCommandUpdateTypes |= command.UpdateType;
 				}
-
-
+				
 				if(EchoState)
 				{ Echo("Done Creating RuntimeEnvironment"); }
 			}
+			
+			///<summary>
+			///This should be called ONCE in main(). Advances the internal state and runs all jobs that would happen on that tick.
+			///</summary>
+			///<param name="args">the <c>string</c> that <c>Main(string args, UpdateType)</c> gets handed</param>
+			///<param name="updateType">the <c>UpdateType</c> that <c>Main(string args, UpdateType)</c> gets handed</param>
+			///<param name="execute">if false, only the state will be advanced but no jobs will be excuted</param>
+			///<see cref="RuntimeEnvironment"/>
+			public void Tick(string args, UpdateType updateType, bool execute = true)
+			{
+				if( (updateType & KnownCommandUpdateTypes) != 0 )
+				{
+					execute &= ParseArgs(args);
+				}
 
+				if (JobNames.Count > 0)
+				{
 
-			private bool Command_Toggle(string[] args)
+					if (Online && execute)
+					{
+						if (CurrentTick % interval == 0)
+						{
+							foreach (var job in Jobs)
+							{
+								if (job.Value.active && CurrentTick % job.Value.RequeueInterval == 0)
+								{
+									TryQueueJob(job.Key);
+								}
+							}
+						}
+
+						ProcessRunningJobs();
+
+						bool hasstates = false;
+						foreach (var name in JobNames)
+						{
+							if (RunningJobs[name] != null)
+							{
+								++FastTick;
+								hasstates = true;
+								ThisProgram.Runtime.UpdateFrequency = UpdateFrequency.Once;
+								break;
+							}
+						}
+
+						if (!hasstates)
+						{
+							FastTick = 0;
+							SyncTick();
+							UpdateOnline();
+						}
+					}
+
+					CurrentTick += FastTick > 0 ? 1 : CurrentTickrate;
+					++SymbolTick;
+					LastRuntime = ThisProgram.Runtime.LastRunTimeMs / 1000;
+					TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds + LastRuntime;
+					ContinousTime += TimeSinceLastCall;
+
+					if (EchoState)
+					{
+						ThisProgram.Echo(TickString());
+						ThisProgram.Echo(StatsString());
+					}
+				}
+			}
+
+			///<summary>
+			///toggles the entire env if no args given, toggles name if name given, sets name if name and state given
+			///</summary>
+			///<param name="name">name of the Job</param>
+			///<param name="state">targetstate. 1 for On, 0 for Off, -1 for toggle</param>
+			public void SetActive(string name = "", int state = -1)
+			{
+				if (string.IsNullOrEmpty(name) && state == -1)
+				{
+					Online = !Online;
+					Echo(Online ? "starting..." : "pausing...");
+				}
+				else if (Jobs.ContainsKey(name) && Jobs[name].AllowToggle )
+				{
+					var active = state == -1 ? !Jobs[name].active : state != 0;
+					Jobs[name].active = active;
+					Online |= active;
+				}
+				if (Online && !Jobs.Values.Any(x => x.active))
+				{
+					Online = false;
+					Echo("paused because there is no active job");
+				}
+				UpdateInterval();
+			}
+
+			///<summary>
+			///Sets the execution interval for a job. The intervall will be sanitized to multiples of the appropriate PB update frequency Only call this if you want to do something special from somewhere else
+			///</summary>
+			///<param name="newinterval">new interval. Will be sanatized</param>
+			///<param name="name">name of the Job. If empty all jobs will be set</param>
+			public void SetInterval(int newinterval, string name = "")
+			{
+				newinterval = SanitizeInterval(newinterval);
+				//update tickrate for jobs
+				if (string.IsNullOrEmpty(name))
+				{
+					foreach (var jname in JobNames)
+					{ if (Jobs[jname].AllowFrequencyChange) { Jobs[jname].RequeueInterval = newinterval; } }
+				}
+				else if (Jobs.ContainsKey(name) && Jobs[name].AllowFrequencyChange )
+				{ Jobs[name].RequeueInterval = newinterval; }
+				
+				UpdateInterval(newinterval);
+			}
+			#endregion public functions
+
+			#region private functions
+			private bool ParseArgs(string args)
+			{
+				if (string.IsNullOrEmpty(args))
+				{ return true; }
+
+				var substrings = args.Split(' ');
+
+				if ( Commands.Keys.Any(x => x == substrings[0]) )
+				{
+					if ( Commands[substrings[0]].MinumumArguments < substrings.Length )
+					{
+						return Commands[substrings[0]].Action(substrings);
+					}
+				}
+				return true;
+			}
+
+			private void TryQueueJob(string name)
+			{
+				if (Jobs.ContainsKey(name))
+				{
+					if (RunningJobs[name] == null)
+					{
+						RunningJobs[name] = Jobs[name].Action();
+						Online = true;
+					}
+				}
+			}
+
+			private void ProcessRunningJobs()
+			{
+				foreach( var job in JobNames )
+				{
+					if( RunningJobs[job] != null )
+					{
+						if( !RunningJobs[job].MoveNext() )
+						{
+							RunningJobs[job].Dispose();
+							RunningJobs[job] = null;
+						}
+					}
+				}
+			}
+
+			private static int SanitizeInterval(int interval)
+			{
+				var oom = Math.Floor(Math.Log10(interval+1));
+				oom = oom < 3 ? oom : 2;
+				var factor = Math.Round(interval / Math.Pow(10,oom));
+				return (int)(factor * Math.Pow(10, oom));
+			}
+
+			private static int RateNeededForInterval(int interval)
+			{
+				var oom = Math.Floor(Math.Log10(interval + 1));
+				int res = (int)Math.Pow(10, oom);
+				return res<100?res:100;
+			}
+
+			private void UpdateOnline()
+			{
+				Online = Jobs.Values.Any(x => x.active);
+				ThisProgram.Runtime.UpdateFrequency = Online ? intervalToFrequency[RateNeededForInterval(CurrentTickrate - FastTick)] : UpdateFrequency.None;
+			}
+
+			private void UpdateInterval( int newinterval = maxinterval)
+			{
+				foreach( var job in Jobs.Values )
+				{
+					if( job.active && newinterval > job.RequeueInterval)
+					{ newinterval = job.RequeueInterval; }
+				}
+
+				SyncTick();
+				interval = newinterval;
+				CurrentTickrate = RateNeededForInterval(newinterval);
+				ThisProgram.Runtime.UpdateFrequency = Online ? intervalToFrequency[CurrentTickrate] : UpdateFrequency.None;
+			}
+
+			private void SyncTick()
+			{
+				CurrentTick -= CurrentTick % CurrentTickrate;
+			}
+
+			#region commands
+			private bool CMD_toggle(string[] args)
 			{
 				if( args.Length == 1 || string.IsNullOrWhiteSpace(args[1]) )
 				{ SetActive(); }
@@ -248,224 +450,11 @@ namespace IngameScript
 
 				return true;
 			}
+			#endregion commands
 
-			private bool ParseArgs(string args)
-			{
-				if (string.IsNullOrEmpty(args))
-				{ return true; }
+			#endregion private functions
 
-				var substrings = args.Split(' ');
-
-				if ( Commands.Keys.Any(x => x == substrings[0]) )
-				{
-					if ( Commands[substrings[0]].MinumumArguments < substrings.Length )
-					{
-						//Echo("executing command\n\"", substrings, "\"");
-						return Commands[substrings[0]].Action(substrings);
-					}
-				}
-				return true;
-			}
-
-			///<summary>
-			///This should be called ONCE in main(). Advances the internal state and runs all jobs that would happen on that tick.
-			///</summary>
-			///<param name="args">the <c>string</c> that <c>Main(string args, UpdateType)</c> gets handed</param>
-			///<param name="updateType">the <c>UpdateType</c> that <c>Main(string args, UpdateType)</c> gets handed</param>
-			///<param name="execute">if false, only the state will be advanced but no jobs will be excuted</param>
-			///<see cref="RuntimeEnvironment"/>
-			public void Tick(string args, UpdateType updateType, bool execute = true)
-			{
-				if( (updateType & KnownCommandUpdateTypes) != 0 )
-				{
-					execute &= ParseArgs(args);
-				}
-
-				if (JobNames.Any())
-				{
-
-					if (Online && execute)
-					{
-						if (CurrentTick % interval == 0)
-						{
-							foreach (var job in Jobs)
-							{
-								if (job.Value.active && CurrentTick % job.Value.RequeueInterval == 0)
-								{
-									TryQueueJob(job.Key);
-								}
-							}
-						}
-
-						ProcessRunningJobs();
-
-						bool hasstates = false;
-						foreach (var name in JobNames)
-						{
-							if (RunningJobs[name] != null)
-							{
-								++VirtualTick;
-								hasstates = true;
-								ThisProgram.Runtime.UpdateFrequency = UpdateFrequency.Once;
-								break;
-							}
-						}
-
-						if (!hasstates)
-						{
-							VirtualTick = 0;
-							SyncTick();
-							UpdateOnline();
-						}
-					}
-
-					CurrentTick += VirtualTick > 0 ? 1 : CurrentTickrate;
-					++SymbolTick;
-					LastRuntime = ThisProgram.Runtime.LastRunTimeMs / 1000;
-					TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds + LastRuntime;
-					ContinousTime += TimeSinceLastCall;
-
-					if (EchoState)
-					{
-						ThisProgram.Echo(TickString());
-						ThisProgram.Echo(StatsString());
-					}
-				}
-			}
-
-			private void UpdateOnline()
-			{
-				Online = Jobs.Values.Any(x => x.active);
-				ThisProgram.Runtime.UpdateFrequency = Online ? intervalToFrequency[RateNeededForInterval(CurrentTickrate - VirtualTick)] : UpdateFrequency.None;
-			}
-
-
-			private void TryQueueJob(string name)
-			{
-				if (Jobs.ContainsKey(name))
-				{
-					if (RunningJobs[name] == null)
-					{
-						RunningJobs[name] = Jobs[name].Action();
-						Online = true;
-					}
-				}
-			}
-
-
-			private void ProcessRunningJobs()
-			{
-				foreach( var job in JobNames )
-				{
-					if( RunningJobs[job] != null )
-					{
-						if( !RunningJobs[job].MoveNext() )
-						{
-							RunningJobs[job].Dispose();
-							RunningJobs[job] = null;
-						}
-					}
-				}
-			}
-
-			///<summary>
-			///toggles the entire env if no args given, toggles name if name given, sets name if name and state given
-			///</summary>
-			///<param name="name">name of the Job</param>
-			///<param name="state">targetstate. 1 for On, 0 for Off, -1 for toggle</param>
-			public void SetActive(string name = "", int state = -1)
-			{
-				if (string.IsNullOrEmpty(name) && state == -1)
-				{
-					Online = !Online;
-					Echo(Online ? "starting..." : "pausing...");
-				}
-				else if (Jobs.ContainsKey(name) && Jobs[name].AllowToggle )
-				{
-					var active = state == -1 ? !Jobs[name].active : state != 0;
-					Jobs[name].active = active;
-					Online |= active;
-				}
-				if (Online && !Jobs.Values.Any(x => x.active))
-				{
-					Online = false;
-					Echo("paused because there is no active job");
-				}
-				UpdateInterval();
-			}
-
-			
-
-			private int SanitizeInterval(int interval)
-			{
-				var oom = Math.Floor(Math.Log10(interval+1));
-				oom = oom < 3 ? oom : 2;
-				var factor = Math.Round(interval / Math.Pow(10,oom));
-				return (int)(factor * Math.Pow(10, oom));
-			}
-
-			private int RateNeededForInterval(int interval)
-			{
-				var oom = Math.Floor(Math.Log10(interval + 1));
-				int res = (int)Math.Pow(10, oom);
-				return res<100?res:100;
-			}
-
-			///<summary>
-			///Sets the execution interval for a job. The intervall will be sanitized to multiples of the appropriate PB update frequency Only call this if you want to do something special from somewhere else
-			///</summary>
-			///<param name="newinterval">new interval. Will be sanatized</param>
-			///<param name="name">name of the Job. If empty all jobs will be set</param>
-			public void SetInterval(int newinterval, string name = "")
-			{
-				newinterval = SanitizeInterval(newinterval);
-				//update tickrate for jobs
-				if (string.IsNullOrEmpty(name))
-				{
-					foreach (var jname in JobNames)
-					{ if (Jobs[jname].AllowFrequencyChange) { Jobs[jname].RequeueInterval = newinterval; } }
-				}
-				else if (Jobs.ContainsKey(name) && Jobs[name].AllowFrequencyChange )
-				{ Jobs[name].RequeueInterval = newinterval; }
-
-				UpdateInterval(newinterval);
-			}
-
-			static readonly Dictionary<int, UpdateFrequency> intervalToFrequency = new Dictionary<int, UpdateFrequency>() {
-				{ 1, UpdateFrequency.Update1 },
-				{ 10, UpdateFrequency.Update10 },
-				{ 100, UpdateFrequency.Update100 }
-			};
-
-			private void UpdateInterval( int newinterval = maxinterval)
-			{
-				foreach( var job in Jobs.Values )
-				{
-					if( job.active && newinterval > job.RequeueInterval)
-					{ newinterval = job.RequeueInterval; }
-				}
-
-				SyncTick();
-				interval = newinterval;
-				CurrentTickrate = RateNeededForInterval(newinterval);
-				ThisProgram.Runtime.UpdateFrequency = Online ? intervalToFrequency[CurrentTickrate] : UpdateFrequency.None;
-			}
-
-			private void SyncTick()
-			{
-				CurrentTick -= CurrentTick % CurrentTickrate;
-			}
-
-			///<summary>
-			///Resets internal tick and continous time
-			///</summary>
-			//public void reset()
-			//{
-			//	CurrentTick = 0;
-			//	ContinousTime = 0;
-			//	VirtualTick = 0;
-			//}
-
+			#region infostrings
 			///<summary>
 			///a string that will be different every CurrentTick so you can tell the program is still working.
 			///</summary>
@@ -490,10 +479,14 @@ namespace IngameScript
 				}
 			}
 
+			/// <summary>
+			/// a string containing information about the current state of the <c>RuntimeEnvironment</c>
+			/// </summary>
+			/// <returns></returns>
 			public string StatsString()
 			{
 				string res = "UpdateFrequency: " + ThisProgram.Runtime.UpdateFrequency.ToString() + "\n";
-				res += "virtual tick: " + VirtualTick.ToString() + "\n";
+				res += "fast tick: " + FastTick.ToString() + "\n";
 				res += "a job every " + interval.ToString() + " serverticks\n";
 				res += string.Format("since last call: {0:.###}s\n", TimeSinceLastCall);
 				res += string.Format("last runtime: {0:.0###}s\n", LastRuntime);
@@ -507,8 +500,9 @@ namespace IngameScript
 				}
 				return res;
 			}
+			#endregion inforstrings
 
-
+			#region helpers
 			///<summary>
 			///builds a space separated string from all arguments and Echos it. Expands enumerable types, except for string.
 			///</summary>
@@ -598,6 +592,7 @@ namespace IngameScript
 
 				return res;
 			}
+			#endregion helpers
 		}
 	}
 }
