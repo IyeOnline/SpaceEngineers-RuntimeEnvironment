@@ -72,7 +72,9 @@ namespace IngameScript
 				{ UpdateFrequency.Update100, "100"},
 				{ UpdateFrequency.Update1 | UpdateFrequency.Once, "  1 + 1"},
 				{ UpdateFrequency.Update10 | UpdateFrequency.Once, " 10 + 1"},
-				{ UpdateFrequency.Update100 | UpdateFrequency.Once, "100 + 1"}
+				{ UpdateFrequency.Update100 | UpdateFrequency.Once, "100 + 1"},
+				{ UpdateFrequency.Update1 | UpdateFrequency.Update10 | UpdateFrequency.Once, " 11 + 1" },
+				{ UpdateFrequency.Update1 | UpdateFrequency.Update100 | UpdateFrequency.Once, "101 + 1" }
 			};
 
 			#region classes
@@ -423,7 +425,7 @@ namespace IngameScript
 			{
 				if( Online )
 				{
-					ThisProgram.Runtime.UpdateFrequency |= FastTick>0 ? UpdateFrequency.Once : intervalToFrequency[CurrentTickrate];
+					ThisProgram.Runtime.UpdateFrequency = FastTick>0 ? UpdateFrequency.Once : intervalToFrequency[CurrentTickrate];
 				}
 				else
 				{ ThisProgram.Runtime.UpdateFrequency = UpdateFrequency.None; }
@@ -526,12 +528,12 @@ namespace IngameScript
 			/// <returns></returns>
 			public string StatsString()
 			{
-				//string freqstring = "";
-				//if( FrequencyToString.Keys.Contains(ThisProgram.Runtime.UpdateFrequency) )
-				//{ freqstring = FrequencyToString[ThisProgram.Runtime.UpdateFrequency]; }
-				//else
-				//{ freqstring = ThisProgram.Runtime.UpdateFrequency.ToString();  }
-				string res = "UpdateFrequency: " + FrequencyToString[ThisProgram.Runtime.UpdateFrequency] + "\n";
+				string res = "UpdateFrequency: " + (
+					FrequencyToString.Keys.Contains(ThisProgram.Runtime.UpdateFrequency) ?
+					FrequencyToString[ThisProgram.Runtime.UpdateFrequency]:
+					"???" )
+					+ "\n";
+				//string res = "UpdateFrequency: " + FrequencyToString[ThisProgram.Runtime.UpdateFrequency] + "\n";
 				res += "fast tick: " + FastTick.ToString() + " (" + FastTickMax.ToString() + ")\n";
 				res += "a job every " + interval.ToString() + " serverticks\n";
 				res += string.Format("since last call: {0:.###}s\n", TimeSinceLastCall);
