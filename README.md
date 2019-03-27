@@ -8,7 +8,11 @@ Always wanted to allow your script users to use console commands, but were too l
 Then fear not, this project is for you!
 
 # When to use it
-Dont use it if you dont need any of its features. A simple script checking the state of your batteries really doesnt need this if your adhere to reasonable coding standards.
+**Don't** use it if you dont *need* any of its features. A simple script checking the state of your batteries really doesnt need this. 
+
+**Don't** use it just to (try to) increase the performance of your script. If you need performance improvements that bad, you have other issues.
+
+**Do** use it when you want to space out the executions of parts of your script, but dont want to worry about controlling all of that.
 
 # How to use it properly
 1. Setup [Malware](https://github.com/malware-dev)'s amazing [Development Kit for SE](https://github.com/malware-dev/MDK-SE/ "MDK-SE")
