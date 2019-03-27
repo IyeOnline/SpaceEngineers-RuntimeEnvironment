@@ -204,11 +204,11 @@ namespace IngameScript
 				}
 				
 				if(AllowToggle)
-				{ Commands.Add("toggle", new Command(CMD_toggle)); }
+				{ Commands.Add("toggle", new Command(CMD_toggle,0, UpdateType.Trigger | UpdateType.Terminal)); }
 				if(AllowFrequencyChange)
-				{ Commands.Add("frequency", new Command(CMD_freq)); }
+				{ Commands.Add("frequency", new Command(CMD_freq, 1)); }
 
-				Commands.Add("run", new Command(CMD_run,1));
+				Commands.Add("run", new Command(CMD_run,1, UpdateType.Trigger | UpdateType.Terminal));
 				
 				
 				foreach(var command in Commands.Values)
@@ -605,28 +605,6 @@ namespace IngameScript
 				{
 					ThisProgram.Echo(text);
 				}
-			}
-
-			/// <summary>
-			/// Wrapper around <c>RuntimeEnvironment.ThisProgram.GridTerminalSystem.GetBlocksOfType<typeparamref name="T"/>(<paramref name="L"/>,<paramref name="conditional"/>)</c>
-			/// </summary>
-			/// <typeparam name="T">Block Type to fetch</typeparam>
-			/// <param name="L">output List</param>
-			/// <param name="conditional">filter</param>
-			public void GetBlocksOfType<T>(List<T> L, Func<T, bool> conditional = null)
-				where T : class, IMyTerminalBlock
-			{
-				ThisProgram.GridTerminalSystem.GetBlocksOfType(L, conditional);
-			}
-
-			/// <summary>
-			/// Wrapper around <c>RuntimeEnvironment.ThisProgram.GridTerminalSystem.GetBlockGroups(<paramref name="L"/>,<paramref name="conditional"/>)</c>
-			/// </summary>
-			/// <param name="L">output List</param>
-			/// <param name="contitional">filter</param>
-			public void GetBlockGroups(List<IMyBlockGroup> L, Func<IMyBlockGroup, bool> contitional = null)
-			{
-				ThisProgram.GridTerminalSystem.GetBlockGroups(L, contitional);
 			}
 
 			/// <summary>
