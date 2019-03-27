@@ -27,9 +27,9 @@ namespace IngameScript
 		/// <seealso cref="CurrentTick(string, UpdateType, bool)"/>
 		public class RuntimeEnvironment
 		{
-			const int maxinterval = 900;
-			static readonly string[] forbiddenJobs = { "all" }; //strings that are used for some internal commands instead of jobnames
-			static readonly string[] forbiddenCommands = { "toggle", "run", "frequency" }; //commands that are used by the given control structure
+			const int maxinterval = int.MaxValue;
+			private readonly List<string> ForbiddenJobNames = new List<string>(){ "all" }; //strings that are used for some internal commands in the place of jobnames
+			private readonly List<string> ForbiddenCommands = new List<string>(){ "toggle", "run", "frequency" }; //commands that are already provided by the environment
 
 			public bool Online { get; private set; } = false;
 			private int CurrentTick = 0;
@@ -37,6 +37,7 @@ namespace IngameScript
 			private int interval = maxinterval;
 			public int CurrentTickrate { get; private set; }
 			private int FastTick = 0;
+			private int FastTickMax = 0;
 
 			public double ContinousTime { get; private set; } = 0;
 			public double TimeSinceLastCall { get; private set; } = 0;
@@ -53,10 +54,23 @@ namespace IngameScript
 
 			public MyGridProgram ThisProgram { get; }
 
-			private static readonly Dictionary<int, UpdateFrequency> intervalToFrequency = new Dictionary<int, UpdateFrequency>() {
+			private static readonly Dictionary<int, UpdateFrequency> intervalToFrequency = new Dictionary<int, UpdateFrequency>()
+			{
 				{ 1, UpdateFrequency.Update1 },
 				{ 10, UpdateFrequency.Update10 },
 				{ 100, UpdateFrequency.Update100 }
+			};
+
+			private static readonly Dictionary<UpdateFrequency, string> FrequencyToString = new Dictionary<UpdateFrequency, string>()
+			{
+				{ UpdateFrequency.None, "off"},
+				{ UpdateFrequency.Once, "onc"},
+				{ UpdateFrequency.Update1, "  1"},
+				{ UpdateFrequency.Update10, " 10"},
+				{ UpdateFrequency.Update100, "100"},
+				{ UpdateFrequency.Update1 | UpdateFrequency.Once, "  1 + 1"},
+				{ UpdateFrequency.Update10 | UpdateFrequency.Once, " 10 + 1"},
+				{ UpdateFrequency.Update100 | UpdateFrequency.Once, "100 + 1"}
 			};
 
 			#region classes
@@ -100,7 +114,7 @@ namespace IngameScript
 			/// <summary>
 			/// The data structure for a Command
 			/// </summary>
-			/// <see cref="Command(Func<string[], bool>, int, UpdateType)"/>
+			/// <see cref="Command.Command(Func{string[], bool}, int, UpdateType)"/>
 			/// <seealso cref="Tick(string, UpdateType, bool)"/>
 			public class Command
 			{
@@ -149,11 +163,14 @@ namespace IngameScript
 				Jobs = _Jobs;
 				if (EchoState)
 				{ Echo("registered", Jobs.Count, "jobs"); }
-				foreach( var job in Jobs)
+				foreach( var job in Jobs )
 				{
-					if( Array.IndexOf( forbiddenJobs, job.Key ) > -1 )
-					{ throw new Exception("forbidden job key \"" + job.Key + "\" encountered."); }
-					
+					if (ForbiddenJobNames.Any( x => x == job.Key ))
+					{
+						Echo("forbidden job key \"", job.Key, "\" encountered.");
+						throw new ArgumentException();
+					}
+
 					job.Value.RequeueInterval = SanitizeInterval(job.Value.RequeueInterval);
 					RunningJobs.Add(job.Key, null);
 					if(EchoState)
@@ -170,8 +187,11 @@ namespace IngameScript
 				{ Echo("registered", Commands.Count, "commands"); }
 				foreach (var command in Commands.Keys)
 				{
-					if (Array.IndexOf(forbiddenJobs, command ) > -1)
-					{ throw new Exception("forbidden command key \"" + command + "\" encountered."); }
+					if (ForbiddenCommands.Any(x => x == command))
+					{
+						Echo("forbidden command key \"", command, "\" encountered.");
+						throw new ArgumentException();
+					}
 					if(EchoState)
 					{ Echo("   ", command); }
 					
@@ -228,8 +248,10 @@ namespace IngameScript
 							if (RunningJobs[name] != null)
 							{
 								++FastTick;
+								if(FastTick>FastTickMax)
+								{ ++FastTickMax; }
 								hasstates = true;
-								ThisProgram.Runtime.UpdateFrequency = UpdateFrequency.Once;
+								ThisProgram.Runtime.UpdateFrequency |= UpdateFrequency.Once;
 								break;
 							}
 						}
@@ -366,7 +388,8 @@ namespace IngameScript
 			private void UpdateOnline()
 			{
 				Online = Jobs.Values.Any(x => x.active);
-				ThisProgram.Runtime.UpdateFrequency = Online ? intervalToFrequency[RateNeededForInterval(CurrentTickrate - FastTick)] : UpdateFrequency.None;
+				//ThisProgram.Runtime.UpdateFrequency = Online ? intervalToFrequency[RateNeededForInterval(CurrentTickrate - FastTick)] : UpdateFrequency.None;
+				SetUpdateFrequency();
 			}
 
 			private void UpdateInterval( int newinterval = maxinterval)
@@ -380,12 +403,22 @@ namespace IngameScript
 				SyncTick();
 				interval = newinterval;
 				CurrentTickrate = RateNeededForInterval(newinterval);
-				ThisProgram.Runtime.UpdateFrequency = Online ? intervalToFrequency[CurrentTickrate] : UpdateFrequency.None;
+				SetUpdateFrequency();
 			}
 
 			private void SyncTick()
 			{
 				CurrentTick -= CurrentTick % CurrentTickrate;
+			}
+
+			private void SetUpdateFrequency()
+			{
+				if( Online )
+				{
+					ThisProgram.Runtime.UpdateFrequency |= FastTick>0 ? UpdateFrequency.Once : intervalToFrequency[CurrentTickrate];
+				}
+				else
+				{ ThisProgram.Runtime.UpdateFrequency = UpdateFrequency.None; }
 			}
 
 			#region commands
@@ -485,8 +518,13 @@ namespace IngameScript
 			/// <returns></returns>
 			public string StatsString()
 			{
-				string res = "UpdateFrequency: " + ThisProgram.Runtime.UpdateFrequency.ToString() + "\n";
-				res += "fast tick: " + FastTick.ToString() + "\n";
+				//string freqstring = "";
+				//if( FrequencyToString.Keys.Contains(ThisProgram.Runtime.UpdateFrequency) )
+				//{ freqstring = FrequencyToString[ThisProgram.Runtime.UpdateFrequency]; }
+				//else
+				//{ freqstring = ThisProgram.Runtime.UpdateFrequency.ToString();  }
+				string res = "UpdateFrequency: " + FrequencyToString[ThisProgram.Runtime.UpdateFrequency] + "\n";
+				res += "fast tick: " + FastTick.ToString() + " (" + FastTickMax.ToString() + ")\n";
 				res += "a job every " + interval.ToString() + " serverticks\n";
 				res += string.Format("since last call: {0:.###}s\n", TimeSinceLastCall);
 				res += string.Format("last runtime: {0:.0###}s\n", LastRuntime);
@@ -506,17 +544,26 @@ namespace IngameScript
 			///<summary>
 			///builds a space separated string from all arguments and Echos it. Expands enumerable types, except for string.
 			///</summary>
+			///<param name="args">params object array of what you want to echo. objects should have a ToString() method</param>
 			public void Echo(params object[] args)
 			{
 				const string separator = " ";
 				string s = "";
 				foreach (var p in args)
 				{
-					if ( !(p is string) && p is IEnumerable)
-					{ foreach (var x in p as IList) { s += x.ToString() + separator; } }
+					if( p is string )
+					{
+						s += p + separator;
+					}
+					else if ( p is IEnumerable )
+					{
+						foreach (var x in p as IList)
+						{ s += x.ToString() + separator; }
+					}
 					else
-					{ s += p.ToString() + separator; }
-
+					{
+						s += p.ToString() + separator;
+					}
 				}
 				ThisProgram.Echo(s);
 			}
