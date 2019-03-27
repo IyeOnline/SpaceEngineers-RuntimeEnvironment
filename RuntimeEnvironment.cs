@@ -46,6 +46,8 @@ namespace IngameScript
 			private readonly Dictionary<string, Job> Jobs;
 			private Dictionary<string, IEnumerator<bool>> RunningJobs = new Dictionary<string, IEnumerator<bool>>();
 			private readonly List<string> JobNames;
+			private readonly bool AllowToggle = true;
+			private readonly bool AllowFrequencyChange = true;
 
 			private readonly bool EchoState;
 
@@ -170,8 +172,10 @@ namespace IngameScript
 						Echo("forbidden job key \"", job.Key, "\" encountered.");
 						throw new ArgumentException();
 					}
-
 					job.Value.RequeueInterval = SanitizeInterval(job.Value.RequeueInterval);
+					AllowFrequencyChange &= job.Value.AllowFrequencyChange;
+					AllowToggle &= job.Value.AllowToggle;
+
 					RunningJobs.Add(job.Key, null);
 					if(EchoState)
 					{ Echo("   ", job.Key); }
@@ -197,9 +201,13 @@ namespace IngameScript
 					
 				}
 				
-				Commands.Add("toggle", new Command(CMD_toggle) );
+				if(AllowToggle)
+				{ Commands.Add("toggle", new Command(CMD_toggle)); }
+				if(AllowFrequencyChange)
+				{ Commands.Add("frequency", new Command(CMD_freq)); }
+
 				Commands.Add("run", new Command(CMD_run,1));
-				Commands.Add("frequency", new Command(CMD_freq));
+				
 				
 				foreach(var command in Commands.Values)
 				{
