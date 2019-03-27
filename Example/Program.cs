@@ -66,6 +66,7 @@ namespace IngameScript
 						_Action: MyJobFunction,		// the function to be called when your job is active. Needs to be "state machine compatible"
 						_RequeueInterval: 22,		// after how many ticks function will get executed again. this gets sanatized to multiples of 1,10 or 100
 						_active: false,				// is your job active from the start?
+						_lazy:false,				// if true, your job will not switch the Environment into a fast tick mode (assuming it isnt already at updatefrequency 1)
 						_AllowToggle: true,			// is the user allowed to toggle your job off, using the "toggle" command?
 						_AllowFrequencyChange: true // is the user allowed to change the frequency of your job using the "frequency" command?
 					)

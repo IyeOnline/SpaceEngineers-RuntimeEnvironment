@@ -81,13 +81,14 @@ namespace IngameScript
 			/// <summary>
 			/// The data structure for a job
 			/// </summary>
-			/// <see cref="Job(Action, int, bool)"/>
+			/// <see cref="Job.Job(Func{IEnumerator{bool}}, int, bool, bool, bool, bool)"/>
 			/// <seealso cref="Tick(string, UpdateType, bool)"/>
 			public class Job
 			{
 				public readonly Func<IEnumerator<bool>> Action;
 				public int RequeueInterval;
 				public bool active;
+				public readonly bool lazy;
 				public readonly bool AllowToggle;
 				public readonly bool AllowFrequencyChange;
 
@@ -102,14 +103,16 @@ namespace IngameScript
 				///<para>Will be sanatized to a reasonable multiple of possible PB update Frequencies N*(1,10,100)</para>
 				///</param>
 				///<param name="_active">whether the job should be active from the start</param>
+				///<param name="_lazy">if true, your job will not switch the environment into fast tick mode, but instead space your job out</param>
 				///<param name="_AllowToggle">whether the user should be allowed to use the command "toggle" to turn this job on or off.</param>
 				///<param name="_AllowFrequencyChange">whether the user should be allowed to use the command "frequency" to change the requeue interval of this job.</param>
 				///<seealso cref="Tick(string, UpdateType, bool)"/>
-				public Job( Func<IEnumerator<bool>> _Action, int _RequeueInterval, bool _active, bool _AllowToggle = true, bool _AllowFrequencyChange = true )
+				public Job( Func<IEnumerator<bool>> _Action, int _RequeueInterval, bool _active = true, bool _lazy = true, bool _AllowToggle = true, bool _AllowFrequencyChange = true )
 				{
 					Action = _Action;
 					RequeueInterval = _RequeueInterval;
 					active = _active;
+					lazy = _lazy;
 					AllowToggle = _AllowToggle;
 					AllowFrequencyChange = _AllowFrequencyChange;	
 				}
@@ -200,7 +203,6 @@ namespace IngameScript
 					}
 					if(EchoState)
 					{ Echo("   ", command); }
-					
 				}
 				
 				if(AllowToggle)
@@ -255,13 +257,16 @@ namespace IngameScript
 						bool hasstates = false;
 						foreach (var name in JobNames)
 						{
-							if (RunningJobs[name] != null)
+							if ( !Jobs[name].lazy && RunningJobs[name] != null)
 							{
 								++FastTick;
 								if(FastTick>FastTickMax)
 								{ ++FastTickMax; }
 								hasstates = true;
-								ThisProgram.Runtime.UpdateFrequency |= UpdateFrequency.Once;
+								if ((ThisProgram.Runtime.UpdateFrequency & UpdateFrequency.Update1) == 0)
+								{
+									ThisProgram.Runtime.UpdateFrequency |= UpdateFrequency.Once;
+								}
 								break;
 							}
 						}
@@ -425,7 +430,9 @@ namespace IngameScript
 			{
 				if( Online )
 				{
-					ThisProgram.Runtime.UpdateFrequency = FastTick>0 ? UpdateFrequency.Once : intervalToFrequency[CurrentTickrate];
+					ThisProgram.Runtime.UpdateFrequency = 
+						FastTick>0 && ((ThisProgram.Runtime.UpdateFrequency & UpdateFrequency.Update1) == 0) ? UpdateFrequency.Once :
+						intervalToFrequency[CurrentTickrate];
 				}
 				else
 				{ ThisProgram.Runtime.UpdateFrequency = UpdateFrequency.None; }
