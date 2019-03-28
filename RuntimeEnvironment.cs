@@ -48,8 +48,9 @@ namespace IngameScript
 			private readonly List<string> JobNames;
 			private readonly bool AllowToggle = true;
 			private readonly bool AllowFrequencyChange = true;
-
 			private readonly bool EchoState;
+
+			private readonly MyCommandLine CommandLine = new MyCommandLine();
 
 			private readonly Dictionary<string, Command> Commands;
 			private readonly UpdateType KnownCommandUpdateTypes;
@@ -121,23 +122,23 @@ namespace IngameScript
 			/// <summary>
 			/// The data structure for a Command
 			/// </summary>
-			/// <see cref="Command.Command(Func{string[], bool}, int, UpdateType)"/>
+			/// <see cref="Command.Command(Func{MyCommandLine, bool}, int, UpdateType)"/>
 			/// <seealso cref="Tick(string, UpdateType, bool)"/>
 			public class Command
 			{
-				public readonly Func<string[], bool> Action;
+				public readonly Func<MyCommandLine, bool> Action;
 				public readonly int MinumumArguments;
 				public readonly UpdateType UpdateType;
 
 				/// <summary>
 				/// Constructs a job object
-				/// <para>Will get handed an string array which is the argument string <c>RuntimeEnvironment.Tick(..)</c> got. Note that the first argument will be the command itself</para>
+				/// <para>Will get handed a MyCommandLine argument, which has parsed the argument <c>RuntimeEnvironment.Tick(..)</c> got. Note that the first argument will be the command itself</para>
 				/// </summary>
-				/// <param name="_Action">The function to be called when the command is encoutnered. Gets a <c>string[]</c> which is the space separated commands the PB got</param>
+				/// <param name="_Action">The function to be called when the command is encoutnered. Gets a already populated <c>MyCommandLine</c>, which contains the arguments Tick() got</param>
 				/// <param name="_MinumumArguments">minumum of ADDITIONAL arguments this command needs. Note: not sanitzed for whitespace or empty additional commands</param>
 				/// <param name="_UpdateType">update type the command will be run on. defaults to manually clicking the "run" button</param>
 				/// <seealso cref="Tick(string, UpdateType, bool)"/>
-				public Command( Func<string[], bool> _Action, int _MinumumArguments = 0, UpdateType _UpdateType = UpdateType.Terminal )
+				public Command( Func<MyCommandLine, bool> _Action, int _MinumumArguments = 0, UpdateType _UpdateType = UpdateType.Terminal )
 				{
 					Action = _Action;
 					MinumumArguments = _MinumumArguments;
@@ -343,16 +344,19 @@ namespace IngameScript
 			#region private functions
 			private bool ParseArgs(string args)
 			{
-				if (string.IsNullOrEmpty(args))
+				CommandLine.TryParse(args);
+
+
+				if ( CommandLine.Argument(0) == null )
 				{ return true; }
 
 				var substrings = args.Split(' ');
 
-				if ( Commands.Keys.Any(x => x == substrings[0]) )
+				if ( Commands.Keys.Any(x => x == CommandLine.Argument(0)) )
 				{
-					if ( Commands[substrings[0]].MinumumArguments < substrings.Length )
+					if ( Commands[CommandLine.Argument(0)].MinumumArguments < CommandLine.ArgumentCount )
 					{
-						return Commands[substrings[0]].Action(substrings);
+						return Commands[CommandLine.Argument(0)].Action(CommandLine);
 					}
 				}
 				return true;
@@ -439,63 +443,63 @@ namespace IngameScript
 			}
 
 			#region commands
-			private bool CMD_toggle(string[] args)
+			private bool CMD_toggle(MyCommandLine commandLine)
 			{
-				if( args.Length == 1 || string.IsNullOrWhiteSpace(args[1]) )
+				if( commandLine.ArgumentCount == 1 )//TODO switch to MyCommandLine
 				{ SetActive(); }
-				else if( args.Length == 2 || string.IsNullOrWhiteSpace(args[2]) )
+				else if( commandLine.ArgumentCount == 2 )
 				{
-					if (args[1] == "all")
+					if (commandLine.Argument(1) == "all")
 					{
 						foreach (var name in JobNames)
 						{ SetActive(name); }
 					}
 					else
 					{
-						if( JobNames.Contains(args[1]) && Jobs[args[1]].AllowToggle )
-						{ SetActive(args[1]); }
+						if( JobNames.Contains(commandLine.Argument(1)) )
+						{ SetActive(commandLine.Argument(1)); }
 					}
 				}
-				else if(args.Length == 3 )
+				else if (commandLine.ArgumentCount == 3 )
 				{
-					int state = args[2] == "" ? -1 :
-						args[2] == "off" ? 0 :
-						args[2] == "on" ? 1 :
+					int state = commandLine.Argument(2) == "" ? -1 :
+						commandLine.Argument(2) == "off" ? 0 :
+						commandLine.Argument(2) == "on" ? 1 :
 						-2;
 
 					if (state != -2)
 					{
-						if( args[1] == "all")
+						if(commandLine.Argument(1) == "all")
 						{
 							foreach (var name in JobNames)
 							{ SetActive(name, state); }
 						}
 						else
-						{ SetActive(args[1], state); }
+						{ SetActive(commandLine.Argument(1), state); }
 					}
 				}
 				return true;
 			}
 
-			private bool CMD_run(string[] args)
+			private bool CMD_run(MyCommandLine commandLine)
 			{
-				if(args.Length==1)
+				if(commandLine.ArgumentCount == 1)
 				{ return true; }
 				else
-				{ TryQueueJob(args[1]); return true; }
+				{ TryQueueJob(commandLine.Argument(1)); return true; }
 			}
 
-			private bool CMD_freq(string[] args)
+			private bool CMD_freq(MyCommandLine commandLine)
 			{
 				int i;
-				if ( args.Length > 1 && int.TryParse(args[1], out i) )
+				if (commandLine.ArgumentCount > 1 && int.TryParse(commandLine.Argument(1), out i) )
 				{ SetInterval( i ); }
-				else if(args.Length > 2 && int.TryParse(args[2], out i) )
+				else if(commandLine.ArgumentCount > 2 && int.TryParse(commandLine.Argument(2), out i) )
 				{
-					if (args[1] == "all")
+					if (commandLine.Argument(1) == "all")
 					{ SetInterval(i); }
 					else
-					{ SetInterval(i, args[1]); }
+					{ SetInterval(i, commandLine.Argument(1)); }
 				}
 
 				return true;

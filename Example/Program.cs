@@ -44,11 +44,15 @@ namespace IngameScript
 		/// <summary>
 		/// the function that will be run when we give the command
 		/// </summary>
-		/// <param name="substrings">this will be the arguments given to <c>Tick()</c> split by spaces</param>
+		/// <param name="commandline">A <c>MyCommandLine</c> object, that contains the parsed arguments that Main/Tick got.
+		/// <para>See https://github.com/malware-dev/MDK-SE/wiki/VRage.Game.ModAPI.Ingame.Utilities.MyCommandLine </para>
+		/// </param>
 		/// <returns>whether the script should still execute jobs in this tick</returns>
-		public bool MyCommandFunction(string[] substrings)
+		public bool MyCommandFunction(MyCommandLine commandline)
 		{
-			Env.Echo("my arguments were:", substrings); //This version of echo is capable of expanding lists
+			Env.Echo("there were", commandline.ArgumentCount, "arguments");//This version of echo is capable of expanding argument lists
+			foreach (var x in commandline.Items)
+			{ Env.Echo(x); }
 			return true; //If you return true, the Command will still process any active jobs in the Tick
 		}
 
