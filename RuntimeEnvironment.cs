@@ -42,6 +42,7 @@ namespace IngameScript
 			public double ContinousTime { get; private set; } = 0;
 			public double TimeSinceLastCall { get; private set; } = 0;
 			public double LastRuntime { get; private set; } = 0;
+			public double MaxRunTime { get; private set; } = 0;
 
 			private readonly Dictionary<string, Job> Jobs;
 			private Dictionary<string, IEnumerator<bool>> RunningJobs = new Dictionary<string, IEnumerator<bool>>();
@@ -151,9 +152,10 @@ namespace IngameScript
 			///<summary>
 			///Ctor. call this in your Program Ctor.
 			///</summary>
-			///<param name="_ThisProgram"><c>this</c> to hand over a reference to the calling Program</param>
+			///<param name="_ThisProgram">"<c>this</c>" to hand over a reference to the calling Program</param>
 			///<param name="_Jobs">a dict mapping from a job name to an <c>Job</c>. Mandatory, otherwise this entire class is useless</param>
 			///<param name="_Commands">a dict mapping from a string to an Command. Not mandatory</param>
+			///<param name="_EchoState">whether the enviromnment should echo its state each run.</param>
 			public RuntimeEnvironment(
 				MyGridProgram _ThisProgram,
 				Dictionary<string, Job> _Jobs,
@@ -213,7 +215,6 @@ namespace IngameScript
 
 				Commands.Add("run", new Command(CMD_run,1, UpdateType.Trigger | UpdateType.Terminal));
 				
-				
 				foreach(var command in Commands.Values)
 				{
 					KnownCommandUpdateTypes |= command.UpdateType;
@@ -233,13 +234,10 @@ namespace IngameScript
 			public void Tick(string args, UpdateType updateType, bool execute = true)
 			{
 				if( (updateType & KnownCommandUpdateTypes) != 0 )
-				{
-					execute &= ParseArgs(args);
-				}
+				{ execute &= ParseArgs(args); }
 
 				if (JobNames.Count > 0)
 				{
-
 					if (Online && execute)
 					{
 						if (CurrentTick % interval == 0)
@@ -260,14 +258,12 @@ namespace IngameScript
 						{
 							if ( !Jobs[name].lazy && RunningJobs[name] != null)
 							{
+								hasstates = true;
 								++FastTick;
 								if(FastTick>FastTickMax)
 								{ ++FastTickMax; }
-								hasstates = true;
 								if ((ThisProgram.Runtime.UpdateFrequency & UpdateFrequency.Update1) == 0)
-								{
-									ThisProgram.Runtime.UpdateFrequency |= UpdateFrequency.Once;
-								}
+								{ ThisProgram.Runtime.UpdateFrequency |= UpdateFrequency.Once; }
 								break;
 							}
 						}
@@ -283,12 +279,13 @@ namespace IngameScript
 					CurrentTick += FastTick > 0 ? 1 : CurrentTickrate;
 					++SymbolTick;
 					LastRuntime = ThisProgram.Runtime.LastRunTimeMs / 1000;
+					if( MaxRunTime < LastRuntime ) //TODO make this ignore construction time
+					{ MaxRunTime = LastRuntime;  }
 					TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds + LastRuntime;
 					ContinousTime += TimeSinceLastCall;
 
 					if (EchoState)
 					{
-						ThisProgram.Echo(TickString());
 						ThisProgram.Echo(StatsString());
 					}
 				}
@@ -345,7 +342,6 @@ namespace IngameScript
 			private bool ParseArgs(string args)
 			{
 				CommandLine.TryParse(args);
-
 
 				if ( CommandLine.Argument(0) == null )
 				{ return true; }
@@ -407,11 +403,10 @@ namespace IngameScript
 			private void UpdateOnline()
 			{
 				Online = Jobs.Values.Any(x => x.active);
-				//ThisProgram.Runtime.UpdateFrequency = Online ? intervalToFrequency[RateNeededForInterval(CurrentTickrate - FastTick)] : UpdateFrequency.None;
 				SetUpdateFrequency();
 			}
 
-			private void UpdateInterval( int newinterval = maxinterval)
+			private void UpdateInterval( int newinterval = maxinterval )
 			{
 				foreach( var job in Jobs.Values )
 				{
@@ -426,9 +421,7 @@ namespace IngameScript
 			}
 
 			private void SyncTick()
-			{
-				CurrentTick -= CurrentTick % CurrentTickrate;
-			}
+			{ CurrentTick -= CurrentTick % CurrentTickrate; }
 
 			private void SetUpdateFrequency()
 			{
@@ -501,7 +494,6 @@ namespace IngameScript
 					else
 					{ SetInterval(i, commandLine.Argument(1)); }
 				}
-
 				return true;
 			}
 			#endregion commands
@@ -537,25 +529,33 @@ namespace IngameScript
 			/// a string containing information about the current state of the <c>RuntimeEnvironment</c>
 			/// </summary>
 			/// <returns></returns>
-			public string StatsString()
+			public string StatsString(int which = -1)
 			{
-				string res = "UpdateFrequency: " + (
-					FrequencyToString.Keys.Contains(ThisProgram.Runtime.UpdateFrequency) ?
-					FrequencyToString[ThisProgram.Runtime.UpdateFrequency]:
-					"???" )
-					+ "\n";
-				//string res = "UpdateFrequency: " + FrequencyToString[ThisProgram.Runtime.UpdateFrequency] + "\n";
-				res += "fast tick: " + FastTick.ToString() + " (" + FastTickMax.ToString() + ")\n";
-				res += "a job every " + interval.ToString() + " serverticks\n";
-				res += string.Format("since last call: {0:.###}s\n", TimeSinceLastCall);
-				res += string.Format("last runtime: {0:.0###}s\n", LastRuntime);
-				res += "Jobs:\n----------------\n";
-				const string fmtstring = "{0,-8} {1,3:0} {2,3} {3,1}\n";
-
-				res += string.Format(fmtstring, "name", "int", "Act", "?");
-				foreach( var job in Jobs )
+				string res = "";
+				if (which == -1 || which == 0)
 				{
-					res += string.Format(fmtstring, job.Key, job.Value.RequeueInterval, (job.Value.active ? "On" : "Off"), RunningJobs[job.Key] == null ? "-":"+" );
+					res += "____ System ____\n";
+					res += "UpdateFrequency: " + (
+						FrequencyToString.Keys.Contains(ThisProgram.Runtime.UpdateFrequency) ?
+						FrequencyToString[ThisProgram.Runtime.UpdateFrequency] :
+						"???")
+						+ "\n";
+					//string res = "UpdateFrequency: " + FrequencyToString[ThisProgram.Runtime.UpdateFrequency] + "\n";
+					res += "fast tick: " + FastTick.ToString() + " (" + FastTickMax.ToString() + ")\n";
+					res += "a job every " + interval.ToString() + " serverticks\n";
+					res += string.Format("time elapsed: {0:.###}s\n", TimeSinceLastCall);
+					res += string.Format("last runtime: {0:.0000}s\n", LastRuntime);
+					res += string.Format("max runtime : {0:.0000}s\n", MaxRunTime);
+				}
+				if (which == -1 || which == 1)
+				{
+					res += "____ Jobs ____\n";
+					const string fmtstring = "{0,-8} {1,3:0} {2,3} {3,1}\n";
+					res += string.Format(fmtstring, "name", "int", "Act", "?");
+					foreach (var job in Jobs)
+					{
+						res += string.Format(fmtstring, job.Key, job.Value.RequeueInterval, (job.Value.active ? "On" : "Off"), RunningJobs[job.Key] == null ? "-" : "+");
+					}
 				}
 				return res;
 			}
