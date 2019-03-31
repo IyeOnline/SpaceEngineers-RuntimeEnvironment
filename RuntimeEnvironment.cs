@@ -27,9 +27,13 @@ namespace IngameScript
 		/// <seealso cref="CurrentTick(string, UpdateType, bool)"/>
 		public class RuntimeEnvironment
 		{
-			const int maxinterval = int.MaxValue;
-			private readonly List<string> ForbiddenJobNames = new List<string>(){ "all" }; //strings that are used for some internal commands in the place of jobnames
-			private readonly List<string> ForbiddenCommands = new List<string>(){ "toggle", "run", "frequency" }; //commands that are already provided by the environment
+			const int maxinterval = int.MaxValue - 1;
+			public const string SaveStringBegin = "RTENV";
+			public const string SaveStringEnd = "VNETR";
+			public const char SaveJobSeparator = '\u2194';
+			public const char SaveInfoSeparator = ' ';
+			private readonly List<string> ForbiddenJobNames = new List<string>() { "all" }; //strings that are used for some internal commands in the place of jobnames
+			private readonly List<string> ForbiddenCommands = new List<string>() { "toggle", "run", "frequency" }; //commands that are already provided by the environment
 
 			public bool Online { get; private set; } = false;
 			private int CurrentTick = 0;
@@ -58,14 +62,14 @@ namespace IngameScript
 
 			public MyGridProgram ThisProgram { get; }
 
-			private static readonly Dictionary<int, UpdateFrequency> intervalToFrequency = new Dictionary<int, UpdateFrequency>()
+			private readonly Dictionary<int, UpdateFrequency> intervalToFrequency = new Dictionary<int, UpdateFrequency>()
 			{
 				{ 1, UpdateFrequency.Update1 },
 				{ 10, UpdateFrequency.Update10 },
 				{ 100, UpdateFrequency.Update100 }
 			};
 
-			private static readonly Dictionary<UpdateFrequency, string> FrequencyToString = new Dictionary<UpdateFrequency, string>()
+			private readonly Dictionary<UpdateFrequency, string> FrequencyToString = new Dictionary<UpdateFrequency, string>()
 			{
 				{ UpdateFrequency.None, "off"},
 				{ UpdateFrequency.Once, "onc"},
@@ -223,13 +227,60 @@ namespace IngameScript
 				if(EchoState)
 				{ Echo("Done Creating RuntimeEnvironment"); }
 			}
+
+			/// <summary>
+			/// Loads the activity state and interval for jobs 
+			/// </summary>
+			/// <param name="saveString">The <c>Storage</c> string that the PB API provides</param>
+			/// <returns>Success. If true, there were no errors during loading.</returns>
+			public bool LoadFromString( string saveString )
+			{
+				if (saveString == null || saveString.Length < SaveStringBegin.Length + SaveStringEnd.Length)
+				{ return false; }
+				int pStart = saveString.IndexOf(SaveStringBegin) + SaveStringBegin.Length;
+				int pEnd = saveString.LastIndexOf(SaveJobSeparator + SaveStringEnd);
+				string[] states = saveString.Substring(pStart, pEnd - pStart).Split(SaveJobSeparator);
+
+				foreach( string jobstring in states )
+				{
+					string[] info = jobstring.Split(SaveInfoSeparator);
+					int i = 0;
+					bool active = false;
+					if (JobNames.Contains(info[0]) && int.TryParse(info[1], out i) && bool.TryParse(info[2], out active) )
+					{
+						Jobs[info[0]].RequeueInterval = i;
+						Jobs[info[0]].active = active;
+					}
+					else
+					{ return false; }
+				}
+
+				UpdateOnline();
+				UpdateInterval();
+
+				return true;
+			}
+
+			/// <summary>
+			/// returns the activity and interval of all jobs encoded in a string that can be used in the <c>Save()</c> function
+			/// </summary>
+			/// <returns>the state of the environment encoded in a string</returns>
+			public string GetSaveString()
+			{
+				string saveString = SaveStringBegin;
+				foreach( var job in Jobs )
+				{
+					saveString += job.Key + SaveInfoSeparator + job.Value.RequeueInterval.ToString() + SaveInfoSeparator + job.Value.active.ToString() + SaveJobSeparator;
+				}
+				return saveString + SaveStringEnd;
+			}
 			
 			///<summary>
 			///This should be called ONCE in main(). Advances the internal state and runs all jobs that would happen on that tick.
 			///</summary>
 			///<param name="args">the <c>string</c> that <c>Main(string args, UpdateType)</c> gets handed</param>
 			///<param name="updateType">the <c>UpdateType</c> that <c>Main(string args, UpdateType)</c> gets handed</param>
-			///<param name="execute">if false, only the state will be advanced but no jobs will be excuted</param>
+			///<param name="execute">if false, only the state will be advanced, commands parsed, but no jobs will be excuted</param>
 			///<see cref="RuntimeEnvironment"/>
 			public void Tick(string args, UpdateType updateType, bool execute = true)
 			{
