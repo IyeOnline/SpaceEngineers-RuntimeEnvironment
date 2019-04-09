@@ -176,7 +176,10 @@ namespace IngameScript
 				EchoState = _EchoState;
 				DisplayState = _DisplayState;
 				if(DisplayState)
-				{ ThisProgram.Me.GetSurface(0).ContentType = ContentType.TEXT_AND_IMAGE; }
+				{
+					ThisProgram.Me.GetSurface(0).ContentType = ContentType.TEXT_AND_IMAGE;
+					ThisProgram.Me.GetSurface(0).WriteText("", false);
+				}
 				
 				Output("Creating RuntimeEnvironment...");
 				
@@ -229,13 +232,12 @@ namespace IngameScript
 
 				if(DisplayState)
 				{
-					var textsize = ThisProgram.Me.GetSurface(0).MeasureStringInPixels( new StringBuilder(StatsString()), "Monospace", 1f);
+					var textsize = ThisProgram.Me.GetSurface(0).MeasureStringInPixels( new StringBuilder(StatsString(-2)), "Monospace", 1f);
 					var screensize = ThisProgram.Me.GetSurface(0).SurfaceSize;
-
 					var xscale = screensize[0] / textsize[0];
 					var yscale = screensize[1] / textsize[1];
-
-					ThisProgram.Me.GetSurface(0).FontSize = Math.Min(xscale, yscale) * 1.05f;
+					ThisProgram.Me.GetSurface(0).FontSize = Math.Min(xscale, yscale);
+					ThisProgram.Me.GetSurface(0).Font = "Monospace";
 				}
 
 				Output("Done Creating RuntimeEnvironment");
@@ -343,12 +345,15 @@ namespace IngameScript
 					CurrentTick += FastTick > 0 ? 1 : CurrentTickrate;
 					++SymbolTick;
 					LastRuntime = ThisProgram.Runtime.LastRunTimeMs / 1000;
-					if( MaxRunTime < LastRuntime ) //TODO make this ignore construction time
-					{ MaxRunTime = LastRuntime;  }
+					if( MaxRunTime < LastRuntime )
+					{ MaxRunTime = LastRuntime; }
 					TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds + LastRuntime;
 					ContinousTime += TimeSinceLastCall;
 
-					Output(StatsString());
+					if (EchoState)
+					{ Echo(StatsString(-1)); }
+					if (DisplayState)
+					{ WriteOut(ThisProgram.Me.GetSurface(0), l_surf: null, append: false, EchoOnFail: false, things:StatsString(-2)); }
 				}
 			}
 
@@ -561,10 +566,11 @@ namespace IngameScript
 
 			private void Output(params object[] things)
 			{
+				var text = ToString(things);
 				if (EchoState)
-				{ Echo(things); }
+				{ Echo(text); }
 				if (DisplayState)
-				{ WriteOut(ThisProgram.Me.GetSurface(0), l_surf: null, append: false, EchoOnFail: false, things: things); }
+				{ WriteOut(ThisProgram.Me.GetSurface(0), l_surf: null, append: true, EchoOnFail: false, EndLine: true, things: text); }
 			}
 
 			#endregion private functions
@@ -594,76 +600,124 @@ namespace IngameScript
 				}
 			}
 
+			private List<string> BuildSystemString()
+			{
+				const string fmtstring = "{0,-7} {1,4:0.}";
+
+				return new List<string>()
+				{
+					string.Format(fmtstring, "Freq",
+						FrequencyToString.Keys.Contains(ThisProgram.Runtime.UpdateFrequency) ?
+						FrequencyToString[ThisProgram.Runtime.UpdateFrequency] :
+						"???"
+					),
+					string.Format(fmtstring, "Tick", CurrentTick),
+					string.Format(fmtstring, "fast", FastTick.ToString() + "/" + FastTickMax.ToString() ),
+					string.Format(fmtstring, "Elapsed", TimeSinceLastCall * 1000d),
+					string.Format(fmtstring, "last RT", LastRuntime * 1000d),
+					string.Format(fmtstring, "max RT", MaxRunTime * 1000d),
+				};
+			}
+
+			private List<string> BuildJobString()
+			{
+				const string fmtstring = "{0,-6} {1,4:0} {2,2}";
+
+				var res = new List<string>()
+				{ string.Format(fmtstring, "name", "freq", "act"), "--------------" };
+				foreach (var job in Jobs)
+				{
+					res.Add(string.Format(fmtstring, job.Key.Substring(0, Math.Min(job.Key.Length, 6)), job.Value.RequeueInterval, (job.Value.active ? (RunningJobs[job.Key] == null ? "-" : "+") : " ")));
+				}
+				return res;
+			}
+
 			/// <summary>
 			/// a string containing information about the current state of the <c>RuntimeEnvironment</c>
 			/// </summary>
-			/// <returns></returns>
+			/// <param name="which">which block you want, 0 for system, 1 for jobs, -1 for compact display (monospace LCD), -2 for list (terminal/log)</param>
+			/// <returns>the string you wanted</returns>
 			public string StatsString(int which = -1)
 			{
 				string res = "";
-				if (which == -1 || which == 0)
+				switch (which)
 				{
-					res += "____ System ____\n";
-					res += "UpdateFrequency: " + (
-						FrequencyToString.Keys.Contains(ThisProgram.Runtime.UpdateFrequency) ?
-						FrequencyToString[ThisProgram.Runtime.UpdateFrequency] :
-						"???")
-						+ "\n";
-					//string res = "UpdateFrequency: " + FrequencyToString[ThisProgram.Runtime.UpdateFrequency] + "\n";
-					res += "fast tick: " + FastTick.ToString() + " (" + FastTickMax.ToString() + ")\n";
-					res += "a job every " + interval.ToString() + " serverticks\n";
-					res += string.Format("time elapsed: {0:.###}s\n", TimeSinceLastCall);
-					res += string.Format("last runtime: {0:.0000}s\n", LastRuntime);
-					res += string.Format("max runtime : {0:.0000}s\n", MaxRunTime);
-				}
-				if (which == -1 || which == 1)
-				{
-					res += "____ Jobs ____\n";
-					const string fmtstring = "{0,-8} {1,3:0} {2,3} {3,1}\n";
-					res += string.Format(fmtstring, "name", "int", "Act", "?");
-					foreach (var job in Jobs)
-					{
-						res += string.Format(fmtstring, job.Key, job.Value.RequeueInterval, (job.Value.active ? "On" : "Off"), RunningJobs[job.Key] == null ? "-" : "+");
-					}
+					case 0:
+						{
+							var tmp = BuildSystemString();
+							res = tmp[0];
+							for (int i = 1; i < tmp.Count; ++i)
+							{ res += "\n" + tmp[i]; }
+							break;
+						}
+					case 1:
+						{
+							var tmp = BuildJobString();
+							res = tmp[0];
+							for (int i = 1; i < tmp.Count; ++i)
+							{ res += "\n" + tmp[i]; }
+							break;
+						}
+					case -1:
+						{
+							var tmp = BuildSystemString();
+							res = "___ System ___";
+							foreach( var s in tmp )
+							{ res += "\n" + s; }
+							res += "\n____ Jobs ____";
+							tmp = BuildJobString();
+							foreach (var s in tmp)
+							{ res += "\n" + s; }
+							break;
+						}
+					case -2:
+						{
+							var sys = BuildSystemString();
+							var job = BuildJobString();
+							res = string.Format("{0,11} {1,1}", "", Online ? "Online" : "Offline") + "\n";
+							res += string.Format("{0,-12} | {1,-1}", "   System", "    Jobs");
+							for(int i = 0; i < Math.Max(sys.Count,job.Count); ++i )
+							{ res += string.Format("\n{0,-12} | {1,-1}", i < sys.Count ? sys[i] : "" , i < job.Count ? job[i] : "" ); }
+							break;
+						}
+					default:
+						break;
 				}
 				return res;
 			}
 			#endregion inforstrings
 
 			#region helpers
-
 			private string ToString( params object[] things )
 			{
-				const string separator = " ";
-				string s = "";
-				foreach (var p in things)
+				if (things.Length == 1 && things[0] is string)
+				{ return things[0] as string; }
+				else
 				{
-					if (p is string)
+					const string separator = " ";
+					string s = "";
+					foreach (var p in things)
 					{
-						s += p + separator;
+						if (p is string)
+						{ s += p + separator; }
+						else if (p is IEnumerable)
+						{
+							foreach (var x in p as IList)
+							{ s += x.ToString() + separator; }
+						}
+						else
+						{ s += p.ToString() + separator; }
 					}
-					else if (p is IEnumerable)
-					{
-						foreach (var x in p as IList)
-						{ s += x.ToString() + separator; }
-					}
-					else
-					{
-						s += p.ToString() + separator;
-					}
+					return s;
 				}
-				return s;
 			}
-
 
 			///<summary>
 			///builds a space separated string from all arguments and Echos it. Expands enumerable types, except for string.
 			///</summary>
 			///<param name="things">params object array of what you want to echo. objects should have a ToString() method</param>
 			public void Echo(params object[] things)
-			{
-				ThisProgram.Echo( ToString(things) );
-			}
+			{ ThisProgram.Echo( ToString(things) ); }
 
 			/// <summary>
 			/// Writes the object array to the given surfaces. All other arguments are optional
@@ -673,29 +727,19 @@ namespace IngameScript
 			/// <param name="append">whether to append to the text already on that surface</param>
 			/// <param name="EchoOnFail">whether to Echo if writing to the displays false</param>
 			/// <param name="things">the <c>params object[]</c> of stuff to write</param>
-			public void WriteOut(IMyTextSurface surf = null, List<IMyTextSurface> l_surf = null, bool append = false, bool EchoOnFail = false, params object[] things )
+			public void WriteOut(IMyTextSurface surf = null, List<IMyTextSurface> l_surf = null, bool append = false, bool EchoOnFail = false, bool EndLine = true, params object[] things )
 			{
 				var badgroup = l_surf == null || !l_surf.Any();
-				string text = ToString(things);
+				string text = ToString(things) + (EndLine ? "\n" : "");
 				foreach (var thing in things)
 				{
 					if (surf != null)
-					{
-						surf.WriteText(text, append);
-					}
+					{ surf.WriteText(text, append); }
 					if (!badgroup)
-					{
-						foreach (var s in l_surf)
-						{
-							foreach( var t in things)
-
-							s.WriteText(text, append);
-						}
-					}
+					{ foreach (var s in l_surf)
+						{ s.WriteText(text, append); } }
 					if (EchoOnFail && surf == null && badgroup)
-					{
-						ThisProgram.Echo(text);
-					}
+					{ ThisProgram.Echo(text); }
 				}
 			}
 
@@ -705,7 +749,7 @@ namespace IngameScript
 			/// <typeparam name="Tfind">The type to find</typeparam>
 			/// <typeparam name="Treturn">the type to return</typeparam>
 			/// <param name="Constructor">a function creating a <typeparamref name="Treturn"/> from a <typeparamref name="Tfind"/></param>
-			/// <param name="conditional">an aditional constraing the valid <typeparamref name="Tfind"/> must match</param>
+			/// <param name="conditional">an aditional constraint the <typeparamref name="Tfind"/> must match</param>
 			/// <returns>All objects matching</returns>
 			public List<Treturn> FetchAndConstruct<Tfind, Treturn>( Func<Tfind, Treturn> Constructor, Func<Tfind, bool> conditional = null)
 				where Tfind : class, IMyTerminalBlock
