@@ -11,6 +11,7 @@ using VRage.Collections;
 using VRage.Game.Components;
 using VRage.Game.ModAPI.Ingame;
 using VRage.Game.ModAPI.Ingame.Utilities;
+using VRage.Game.GUI.TextPanel;
 using VRage.Game.ObjectBuilders.Definitions;
 using VRage.Game;
 using VRageMath;
@@ -54,6 +55,7 @@ namespace IngameScript
 			private readonly bool AllowToggle = true;
 			private readonly bool AllowFrequencyChange = true;
 			private readonly bool EchoState;
+			private readonly bool DisplayState;
 
 			private readonly MyCommandLine CommandLine = new MyCommandLine();
 
@@ -160,23 +162,26 @@ namespace IngameScript
 			///<param name="_Jobs">a dict mapping from a job name to an <c>Job</c>. Mandatory, otherwise this entire class is useless</param>
 			///<param name="_Commands">a dict mapping from a string to an Command. Not mandatory</param>
 			///<param name="_EchoState">whether the enviromnment should echo its state each run.</param>
+			///<param name="_DisplayState">whether the environment should display its state onscreen.</param>
 			public RuntimeEnvironment(
 				MyGridProgram _ThisProgram,
 				Dictionary<string, Job> _Jobs,
 				Dictionary<string, Command> _Commands = null,
-				bool _EchoState = false
+				bool _EchoState = false,
+				bool _DisplayState = false
 			)
 			{
 				ThisProgram = _ThisProgram;
 				CurrentTickrate = RateNeededForInterval(interval);
 				EchoState = _EchoState;
+				DisplayState = _DisplayState;
+				if(DisplayState)
+				{ ThisProgram.Me.GetSurface(0).ContentType = ContentType.TEXT_AND_IMAGE; }
 				
-				if(EchoState)
-				{ Echo("Creating RuntimeEnvironment..."); }
+				Output("Creating RuntimeEnvironment...");
 				
 				Jobs = _Jobs;
-				if (EchoState)
-				{ Echo("registered", Jobs.Count, "jobs"); }
+				Output("registered", Jobs.Count, "jobs");
 				foreach( var job in Jobs )
 				{
 					if (ForbiddenJobNames.Any( x => x == job.Key ))
@@ -189,8 +194,7 @@ namespace IngameScript
 					AllowToggle &= job.Value.AllowToggle;
 
 					RunningJobs.Add(job.Key, null);
-					if(EchoState)
-					{ Echo("   ", job.Key); }
+					Output("   ", job.Key); 
 				}
 				JobNames = Jobs.Keys.ToList();
 				
@@ -198,9 +202,8 @@ namespace IngameScript
 				{ Commands = new Dictionary<string, Command>(); }
 				else
 				{ Commands = _Commands; }
-				
-				if(EchoState)
-				{ Echo("registered", Commands.Count, "commands"); }
+
+				Output("registered", Commands.Count, "commands");
 				foreach (var command in Commands.Keys)
 				{
 					if (ForbiddenCommands.Any(x => x == command))
@@ -223,9 +226,19 @@ namespace IngameScript
 				{
 					KnownCommandUpdateTypes |= command.UpdateType;
 				}
-				
-				if(EchoState)
-				{ Echo("Done Creating RuntimeEnvironment"); }
+
+				if(DisplayState)
+				{
+					var textsize = ThisProgram.Me.GetSurface(0).MeasureStringInPixels( new StringBuilder(StatsString()), "Monospace", 1f);
+					var screensize = ThisProgram.Me.GetSurface(0).SurfaceSize;
+
+					var xscale = screensize[0] / textsize[0];
+					var yscale = screensize[1] / textsize[1];
+
+					ThisProgram.Me.GetSurface(0).FontSize = Math.Min(xscale, yscale) * 1.05f;
+				}
+
+				Output("Done Creating RuntimeEnvironment");
 			}
 
 			/// <summary>
@@ -335,10 +348,7 @@ namespace IngameScript
 					TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds + LastRuntime;
 					ContinousTime += TimeSinceLastCall;
 
-					if (EchoState)
-					{
-						ThisProgram.Echo(StatsString());
-					}
+					Output(StatsString());
 				}
 			}
 
@@ -549,6 +559,14 @@ namespace IngameScript
 			}
 			#endregion commands
 
+			private void Output(params object[] things)
+			{
+				if (EchoState)
+				{ Echo(things); }
+				if (DisplayState)
+				{ WriteOut(ThisProgram.Me.GetSurface(0), l_surf: null, append: false, EchoOnFail: false, things: things); }
+			}
+
 			#endregion private functions
 
 			#region infostrings
@@ -613,21 +631,18 @@ namespace IngameScript
 			#endregion inforstrings
 
 			#region helpers
-			///<summary>
-			///builds a space separated string from all arguments and Echos it. Expands enumerable types, except for string.
-			///</summary>
-			///<param name="args">params object array of what you want to echo. objects should have a ToString() method</param>
-			public void Echo(params object[] args)
+
+			private string ToString( params object[] things )
 			{
 				const string separator = " ";
 				string s = "";
-				foreach (var p in args)
+				foreach (var p in things)
 				{
-					if( p is string )
+					if (p is string)
 					{
 						s += p + separator;
 					}
-					else if ( p is IEnumerable )
+					else if (p is IEnumerable)
 					{
 						foreach (var x in p as IList)
 						{ s += x.ToString() + separator; }
@@ -637,35 +652,50 @@ namespace IngameScript
 						s += p.ToString() + separator;
 					}
 				}
-				ThisProgram.Echo(s);
+				return s;
 			}
 
+
 			///<summary>
-			///Writes a string to displays. Will write to both display and group if given
+			///builds a space separated string from all arguments and Echos it. Expands enumerable types, except for string.
 			///</summary>
-			///<param name="text">The text to write</param>
-			///<param name="display">A singular display to write to</param>
-			///<param name="group">A group of displays to write to</param>
-			///<param name="append">whether to append to the display(s)</param>
-			///<param name="EchoOnFail">whether to Echo <paramref name="text"/> if neither <paramref name="display"/> nor <paramref name="group"/> were valid/given</param>
-			public void WriteOut<T>(string text, IMyTextPanel display = null, List<T> group = null, bool append = false, bool EchoOnFail = false)
-				where T : IMyTerminalBlock
+			///<param name="things">params object array of what you want to echo. objects should have a ToString() method</param>
+			public void Echo(params object[] things)
 			{
-				var badgroup = group == null && !group.Any();
-				if (display != null)
+				ThisProgram.Echo( ToString(things) );
+			}
+
+			/// <summary>
+			/// Writes the object array to the given surfaces. All other arguments are optional
+			/// </summary>
+			/// <param name="surf">a single surface to write to</param>
+			/// <param name="l_surf">a list of surfaces to write to</param>
+			/// <param name="append">whether to append to the text already on that surface</param>
+			/// <param name="EchoOnFail">whether to Echo if writing to the displays false</param>
+			/// <param name="things">the <c>params object[]</c> of stuff to write</param>
+			public void WriteOut(IMyTextSurface surf = null, List<IMyTextSurface> l_surf = null, bool append = false, bool EchoOnFail = false, params object[] things )
+			{
+				var badgroup = l_surf == null || !l_surf.Any();
+				string text = ToString(things);
+				foreach (var thing in things)
 				{
-					display.WritePublicText(text, append);
-				}
-				if (!badgroup)
-				{
-					foreach (IMyTextPanel p in group)
+					if (surf != null)
 					{
-						p.WritePublicText(text, append);
+						surf.WriteText(text, append);
 					}
-				}
-				if (EchoOnFail && display == null && badgroup)
-				{
-					ThisProgram.Echo(text);
+					if (!badgroup)
+					{
+						foreach (var s in l_surf)
+						{
+							foreach( var t in things)
+
+							s.WriteText(text, append);
+						}
+					}
+					if (EchoOnFail && surf == null && badgroup)
+					{
+						ThisProgram.Echo(text);
+					}
 				}
 			}
 

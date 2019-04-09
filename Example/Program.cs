@@ -35,7 +35,7 @@ namespace IngameScript
 		public IEnumerator<bool> MyJobFunction()
 		{
 			Echo("-+-+-");
-			yield return true;
+			yield return true; //the job will be "paused" here until the next tick
 			Echo("+-+-+");
 			yield return true;
 			//whatever you want to do
@@ -50,6 +50,7 @@ namespace IngameScript
 		/// <returns>whether the script should still execute jobs in this tick</returns>
 		public bool MyCommandFunction(MyCommandLine commandline)
 		{
+			//this is your command functions body. Note that because its decladed in the body of the Program class, it has access to the RuntimeEnvironemnt and can use its members
 			Env.Echo("there were", commandline.ArgumentCount, "arguments");//This version of echo is capable of expanding argument lists
 			foreach (var x in commandline.Items)
 			{ Env.Echo(x); }
@@ -88,7 +89,13 @@ namespace IngameScript
 				} };
 
 			// create the Environment with a reference to the Program
-			Env = new RuntimeEnvironment(this, jobDict, commandDict, _EchoState : true);
+			Env = new RuntimeEnvironment(
+				_ThisProgram: this, //you need to hand over a reference to the calling program so the environment can control frequencies
+				_Jobs: jobDict, //the dictionary you created above
+				_Commands: commandDict, //OPTIONAL: the command dict you created above
+				_EchoState : true, //OPTIONAL, default false: whether the enviroment should display its state in the terminal every tick
+				_DisplayState: true //OPTIONAL, default false: whether the enviroment should display its state on the running PBs screen every tick
+			);
 		}
 
 		/// <summary>
