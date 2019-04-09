@@ -34,11 +34,10 @@ namespace IngameScript
 		/// </summary>
 		public IEnumerator<bool> MyJobFunction()
 		{
-			Echo("-+-+-");
+			//Echo("-+-+-");
 			yield return true; //the job will be "paused" here until the next tick
-			Echo("+-+-+");
+			//Echo("+-+-+");
 			yield return true;
-			//whatever you want to do
 		}
 
 		/// <summary>
@@ -51,7 +50,7 @@ namespace IngameScript
 		public bool MyCommandFunction(MyCommandLine commandline)
 		{
 			//this is your command functions body. Note that because its decladed in the body of the Program class, it has access to the RuntimeEnvironemnt and can use its members
-			Env.Echo("there were", commandline.ArgumentCount, "arguments");//This version of echo is capable of expanding argument lists
+			Env.Echo("there were", commandline.ArgumentCount, "arguments:");//This version of echo is capable of expanding argument lists
 			foreach (var x in commandline.Items)
 			{ Env.Echo(x); }
 			return true; //If you return true, the Command will still process any active jobs in the Tick
@@ -85,7 +84,7 @@ namespace IngameScript
 						_Action : MyCommandFunction,		// the function to be called when the string is encounted
 						_MinumumArguments : 0,				// the minimum number of arguments (apart from itself) your command expectes. 0 is the default
 						_UpdateType : UpdateType.Terminal	// the update type your command will be run on. defaults to a user pressing the run button
-						)
+					)
 				} };
 
 			// create the Environment with a reference to the Program

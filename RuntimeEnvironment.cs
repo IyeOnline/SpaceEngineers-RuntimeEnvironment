@@ -29,6 +29,7 @@ namespace IngameScript
 		public class RuntimeEnvironment
 		{
 			const int maxinterval = int.MaxValue - 1;
+			const int runtimeRefresh = 5000;
 			public const string SaveStringBegin = "RTENV";
 			public const string SaveStringEnd = "VNETR";
 			public const char SaveJobSeparator = '\u2194';
@@ -36,18 +37,21 @@ namespace IngameScript
 			private readonly List<string> ForbiddenJobNames = new List<string>() { "all" }; //strings that are used for some internal commands in the place of jobnames
 			private readonly List<string> ForbiddenCommands = new List<string>() { "toggle", "run", "frequency" }; //commands that are already provided by the environment
 
-			public bool Online { get; private set; } = false;
-			private int CurrentTick = 0;
-			private int SymbolTick = 0;
-			private int interval = maxinterval;
-			public int CurrentTickrate { get; private set; }
-			private int FastTick = 0;
-			private int FastTickMax = 0;
+			public bool Online { get; private set; } = false; //whether the environment is currently online
+			private int CurrentTick = 0; //the current (continous) tick
+			private int SymbolTick = 0; //the current tick for the symbol output
+			private int interval = maxinterval; //the current min Job requeue interval
+			public int CurrentTickrate { get; private set; } //the current update frequency
+			private int FastTick = 0; //number of consequtive fast ticks
+			private int FastTickMax = 0; //max number of consequtive fast ticks
 
 			public double ContinousTime { get; private set; } = 0;
 			public double TimeSinceLastCall { get; private set; } = 0;
 			public double LastRuntime { get; private set; } = 0;
 			public double MaxRunTime { get; private set; } = 0;
+
+			private CachedObject<List<string>> SystemInfoList;
+			private CachedObject<List<string>> JobInfoList;
 
 			private readonly Dictionary<string, Job> Jobs;
 			private Dictionary<string, IEnumerator<bool>> RunningJobs = new Dictionary<string, IEnumerator<bool>>();
@@ -86,6 +90,22 @@ namespace IngameScript
 			};
 
 			#region classes
+			private class CachedObject<T>
+			{
+				private bool good;
+				private readonly Func<T> Setter;
+				private T Data;
+
+				public CachedObject(Func<T> _Setter)
+				{ Setter = _Setter; Data = Setter(); good = true; }
+
+				public T Get()
+				{ if (!good) Data = Setter(); good = true; return Data; }
+
+				public void Invalidate()
+				{ good = false; }
+			}
+
 			/// <summary>
 			/// The data structure for a job
 			/// </summary>
@@ -100,21 +120,21 @@ namespace IngameScript
 				public readonly bool AllowToggle;
 				public readonly bool AllowFrequencyChange;
 
-				///<summary>Construts a job object</summary>
-				///<param name="_Action">
-				///a statemachine
-				///<para>use <c>yield return true;</c> everytime you want it to wait for the next tick</para>
+				/// <summary>Construts a job object</summary>
+				/// <param name="_Action">
+				/// a statemachine
+				/// <para>use <c>yield return true;</c> everytime you want it to wait for the next tick</para>
 				/// </param>
-				///<param name="_RequeueInterval">
-				///interval between how often the job will be requeued. Note this is server ticks, not PB executes
-				///<para>NOTE: if this is smaller than the number of states the <paramref name="_Action"/> has, it will only be queued once the next interval is hit.</para>
-				///<para>Will be sanatized to a reasonable multiple of possible PB update Frequencies N*(1,10,100)</para>
-				///</param>
-				///<param name="_active">whether the job should be active from the start</param>
-				///<param name="_lazy">if true, your job will not switch the environment into fast tick mode, but instead space your job out</param>
-				///<param name="_AllowToggle">whether the user should be allowed to use the command "toggle" to turn this job on or off.</param>
-				///<param name="_AllowFrequencyChange">whether the user should be allowed to use the command "frequency" to change the requeue interval of this job.</param>
-				///<seealso cref="Tick(string, UpdateType, bool)"/>
+				/// <param name="_RequeueInterval">
+				/// interval between how often the job will be requeued. Note this is server ticks, not PB executes
+				/// <para>NOTE: if this is smaller than the number of states the <paramref name="_Action"/> has, it will only be queued once the next interval is hit.</para>
+				/// <para>Will be sanatized to a reasonable multiple of possible PB update Frequencies N*(1,10,100)</para>
+				/// </param>
+				/// <param name="_active">whether the job should be active from the start</param>
+				/// <param name="_lazy">if true, your job will not switch the environment into fast tick mode, but instead space your job out</param>
+				/// <param name="_AllowToggle">whether the user should be allowed to use the command "toggle" to turn this job on or off.</param>
+				/// <param name="_AllowFrequencyChange">whether the user should be allowed to use the command "frequency" to change the requeue interval of this job.</param>
+				/// <seealso cref="Tick(string, UpdateType, bool)"/>
 				public Job( Func<IEnumerator<bool>> _Action, int _RequeueInterval, bool _active = true, bool _lazy = true, bool _AllowToggle = true, bool _AllowFrequencyChange = true )
 				{
 					Action = _Action;
@@ -155,14 +175,14 @@ namespace IngameScript
 			#endregion classes
 
 			#region public functions
-			///<summary>
-			///Ctor. call this in your Program Ctor.
-			///</summary>
-			///<param name="_ThisProgram">"<c>this</c>" to hand over a reference to the calling Program</param>
-			///<param name="_Jobs">a dict mapping from a job name to an <c>Job</c>. Mandatory, otherwise this entire class is useless</param>
-			///<param name="_Commands">a dict mapping from a string to an Command. Not mandatory</param>
-			///<param name="_EchoState">whether the enviromnment should echo its state each run.</param>
-			///<param name="_DisplayState">whether the environment should display its state onscreen.</param>
+			/// <summary>
+			/// Ctor. call this in your Program Ctor.
+			/// </summary>
+			/// <param name="_ThisProgram">"<c>this</c>" to hand over a reference to the calling Program</param>
+			/// <param name="_Jobs">a dict mapping from a job name to an <c>Job</c>. Mandatory, otherwise this entire class is useless</param>
+			/// <param name="_Commands">a dict mapping from a string to an Command. Not mandatory</param>
+			/// <param name="_EchoState">whether the enviromnment should echo its state each run.</param>
+			/// <param name="_DisplayState">whether the environment should display its state onscreen.</param>
 			public RuntimeEnvironment(
 				MyGridProgram _ThisProgram,
 				Dictionary<string, Job> _Jobs,
@@ -175,6 +195,7 @@ namespace IngameScript
 				CurrentTickrate = RateNeededForInterval(interval);
 				EchoState = _EchoState;
 				DisplayState = _DisplayState;
+				ThisProgram.Echo(DisplayState.ToString());	
 				if(DisplayState)
 				{
 					ThisProgram.Me.GetSurface(0).ContentType = ContentType.TEXT_AND_IMAGE;
@@ -184,7 +205,7 @@ namespace IngameScript
 				Output("Creating RuntimeEnvironment...");
 				
 				Jobs = _Jobs;
-				Output("registered", Jobs.Count, "jobs");
+				Output("registered", Jobs.Count, "jobs:");
 				foreach( var job in Jobs )
 				{
 					if (ForbiddenJobNames.Any( x => x == job.Key ))
@@ -206,7 +227,7 @@ namespace IngameScript
 				else
 				{ Commands = _Commands; }
 
-				Output("registered", Commands.Count, "commands");
+				Output("registered", Commands.Count, "commands:");
 				foreach (var command in Commands.Keys)
 				{
 					if (ForbiddenCommands.Any(x => x == command))
@@ -214,8 +235,7 @@ namespace IngameScript
 						Echo("forbidden command key \"", command, "\" encountered.");
 						throw new ArgumentException();
 					}
-					if(EchoState)
-					{ Echo("   ", command); }
+					Output("   ", command );
 				}
 				
 				if(AllowToggle)
@@ -229,6 +249,9 @@ namespace IngameScript
 				{
 					KnownCommandUpdateTypes |= command.UpdateType;
 				}
+
+				SystemInfoList = new CachedObject<List<string>>(BuildSystemInfoList);
+				JobInfoList = new CachedObject<List<string>>(BuildJobInfoList);
 
 				if(DisplayState)
 				{
@@ -290,13 +313,13 @@ namespace IngameScript
 				return saveString + SaveStringEnd;
 			}
 			
-			///<summary>
-			///This should be called ONCE in main(). Advances the internal state and runs all jobs that would happen on that tick.
-			///</summary>
-			///<param name="args">the <c>string</c> that <c>Main(string args, UpdateType)</c> gets handed</param>
-			///<param name="updateType">the <c>UpdateType</c> that <c>Main(string args, UpdateType)</c> gets handed</param>
-			///<param name="execute">if false, only the state will be advanced, commands parsed, but no jobs will be excuted</param>
-			///<see cref="RuntimeEnvironment"/>
+			/// <summary>
+			/// This should be called ONCE in main(). Advances the internal state and runs all jobs that would happen on that tick.
+			/// </summary>
+			/// <param name="args">the <c>string</c> that <c>Main(string args, UpdateType)</c> gets handed</param>
+			/// <param name="updateType">the <c>UpdateType</c> that <c>Main(string args, UpdateType)</c> gets handed</param>
+			/// <param name="execute">if false, only the state will be advanced, commands parsed, but no jobs will be excuted</param>
+			/// <see cref="RuntimeEnvironment"/>
 			public void Tick(string args, UpdateType updateType, bool execute = true)
 			{
 				if( (updateType & KnownCommandUpdateTypes) != 0 )
@@ -345,23 +368,26 @@ namespace IngameScript
 					CurrentTick += FastTick > 0 ? 1 : CurrentTickrate;
 					++SymbolTick;
 					LastRuntime = ThisProgram.Runtime.LastRunTimeMs / 1000;
-					if( MaxRunTime < LastRuntime )
+					if( MaxRunTime < LastRuntime || CurrentTick % runtimeRefresh < CurrentTickrate )
 					{ MaxRunTime = LastRuntime; }
 					TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds + LastRuntime;
 					ContinousTime += TimeSinceLastCall;
 
 					if (EchoState)
 					{ Echo(StatsString(-1)); }
-					if (DisplayState)
+					if (DisplayState && CurrentTick % 10 == 0 )
 					{ WriteOut(ThisProgram.Me.GetSurface(0), l_surf: null, append: false, EchoOnFail: false, things:StatsString(-2)); }
+
+					SystemInfoList.Invalidate();
+					JobInfoList.Invalidate();
 				}
 			}
 
-			///<summary>
-			///toggles the entire env if no args given, toggles name if name given, sets name if name and state given
-			///</summary>
-			///<param name="name">name of the Job</param>
-			///<param name="state">targetstate. 1 for On, 0 for Off, -1 for toggle</param>
+			/// <summary>
+			/// toggles the entire env if no args given, toggles name if name given, sets name if name and state given
+			/// </summary>
+			/// <param name="name">name of the Job</param>
+			/// <param name="state">targetstate. 1 for On, 0 for Off, -1 for toggle</param>
 			public void SetActive(string name = "", int state = -1)
 			{
 				if (string.IsNullOrEmpty(name) && state == -1)
@@ -383,11 +409,11 @@ namespace IngameScript
 				UpdateInterval();
 			}
 
-			///<summary>
-			///Sets the execution interval for a job. The intervall will be sanitized to multiples of the appropriate PB update frequency Only call this if you want to do something special from somewhere else
-			///</summary>
-			///<param name="newinterval">new interval. Will be sanatized</param>
-			///<param name="name">name of the Job. If empty all jobs will be set</param>
+			/// <summary>
+			/// Sets the execution interval for a job. The intervall will be sanitized to multiples of the appropriate PB update frequency Only call this if you want to do something special from somewhere else
+			/// </summary>
+			/// <param name="newinterval">new interval. Will be sanatized</param>
+			/// <param name="name">name of the Job. If empty all jobs will be set</param>
 			public void SetInterval(int newinterval, string name = "")
 			{
 				newinterval = SanitizeInterval(newinterval);
@@ -504,7 +530,7 @@ namespace IngameScript
 			#region commands
 			private bool CMD_toggle(MyCommandLine commandLine)
 			{
-				if( commandLine.ArgumentCount == 1 )//TODO switch to MyCommandLine
+				if( commandLine.ArgumentCount == 1 )
 				{ SetActive(); }
 				else if( commandLine.ArgumentCount == 2 )
 				{
@@ -575,11 +601,11 @@ namespace IngameScript
 
 			#endregion private functions
 
-			#region infostrings
-			///<summary>
-			///a string that will be different every CurrentTick so you can tell the program is still working.
-			///</summary>
-			///<returns>a string that will be different every CurrentTick so you can tell the program is still working.</returns>
+			#region StringHelper
+			/// <summary>
+			/// a string that will be different every CurrentTick so you can tell the program is still working.
+			/// </summary>
+			/// <returns>a string that will be different every CurrentTick so you can tell the program is still working.</returns>
 			public string TickString()
 			{
 				if (!Online)
@@ -600,95 +626,7 @@ namespace IngameScript
 				}
 			}
 
-			private List<string> BuildSystemString()
-			{
-				const string fmtstring = "{0,-7} {1,4:0.}";
-
-				return new List<string>()
-				{
-					string.Format(fmtstring, "Freq",
-						FrequencyToString.Keys.Contains(ThisProgram.Runtime.UpdateFrequency) ?
-						FrequencyToString[ThisProgram.Runtime.UpdateFrequency] :
-						"???"
-					),
-					string.Format(fmtstring, "Tick", CurrentTick),
-					string.Format(fmtstring, "fast", FastTick.ToString() + "/" + FastTickMax.ToString() ),
-					string.Format(fmtstring, "Elapsed", TimeSinceLastCall * 1000d),
-					string.Format(fmtstring, "last RT", LastRuntime * 1000d),
-					string.Format(fmtstring, "max RT", MaxRunTime * 1000d),
-				};
-			}
-
-			private List<string> BuildJobString()
-			{
-				const string fmtstring = "{0,-6} {1,4:0} {2,2}";
-
-				var res = new List<string>()
-				{ string.Format(fmtstring, "name", "freq", "act"), "--------------" };
-				foreach (var job in Jobs)
-				{
-					res.Add(string.Format(fmtstring, job.Key.Substring(0, Math.Min(job.Key.Length, 6)), job.Value.RequeueInterval, (job.Value.active ? (RunningJobs[job.Key] == null ? "-" : "+") : " ")));
-				}
-				return res;
-			}
-
-			/// <summary>
-			/// a string containing information about the current state of the <c>RuntimeEnvironment</c>
-			/// </summary>
-			/// <param name="which">which block you want, 0 for system, 1 for jobs, -1 for compact display (monospace LCD), -2 for list (terminal/log)</param>
-			/// <returns>the string you wanted</returns>
-			public string StatsString(int which = -1)
-			{
-				string res = "";
-				switch (which)
-				{
-					case 0:
-						{
-							var tmp = BuildSystemString();
-							res = tmp[0];
-							for (int i = 1; i < tmp.Count; ++i)
-							{ res += "\n" + tmp[i]; }
-							break;
-						}
-					case 1:
-						{
-							var tmp = BuildJobString();
-							res = tmp[0];
-							for (int i = 1; i < tmp.Count; ++i)
-							{ res += "\n" + tmp[i]; }
-							break;
-						}
-					case -1:
-						{
-							var tmp = BuildSystemString();
-							res = "___ System ___";
-							foreach( var s in tmp )
-							{ res += "\n" + s; }
-							res += "\n____ Jobs ____";
-							tmp = BuildJobString();
-							foreach (var s in tmp)
-							{ res += "\n" + s; }
-							break;
-						}
-					case -2:
-						{
-							var sys = BuildSystemString();
-							var job = BuildJobString();
-							res = string.Format("{0,11} {1,1}", "", Online ? "Online" : "Offline") + "\n";
-							res += string.Format("{0,-12} | {1,-1}", "   System", "    Jobs");
-							for(int i = 0; i < Math.Max(sys.Count,job.Count); ++i )
-							{ res += string.Format("\n{0,-12} | {1,-1}", i < sys.Count ? sys[i] : "" , i < job.Count ? job[i] : "" ); }
-							break;
-						}
-					default:
-						break;
-				}
-				return res;
-			}
-			#endregion inforstrings
-
-			#region helpers
-			private string ToString( params object[] things )
+			static public string ToString(params object[] things)
 			{
 				if (things.Length == 1 && things[0] is string)
 				{ return things[0] as string; }
@@ -712,10 +650,99 @@ namespace IngameScript
 				}
 			}
 
-			///<summary>
-			///builds a space separated string from all arguments and Echos it. Expands enumerable types, except for string.
-			///</summary>
-			///<param name="things">params object array of what you want to echo. objects should have a ToString() method</param>
+
+			private List<string> BuildSystemInfoList()
+			{
+				const string fmtstring = "{0,-7} {1,4:0.}";
+
+				return new List<string>()
+				{
+					string.Format(fmtstring, "Freq",
+						FrequencyToString.Keys.Contains(ThisProgram.Runtime.UpdateFrequency) ?
+						FrequencyToString[ThisProgram.Runtime.UpdateFrequency] :
+						"???"
+					),
+					string.Format( "{0,-4} {1,7:0.}", "Tick", CurrentTick),
+					string.Format(fmtstring, "fast", FastTick.ToString() + "/" + FastTickMax.ToString() ),
+					string.Format(fmtstring, "Elapsed", TimeSinceLastCall * 1000d),
+					string.Format(fmtstring, "last RT", LastRuntime * 1000d),
+					string.Format(fmtstring, "max RT", MaxRunTime * 1000d),
+				};
+			}
+
+			private List<string> BuildJobInfoList()
+			{
+				const string fmtstring = "{0,-6} {1,4:0} {2,2}";
+
+				var res = new List<string>()
+				{ string.Format(fmtstring, "name", "freq", "act"), "--------------" };
+				foreach (var job in Jobs)
+				{
+					res.Add(string.Format(fmtstring, job.Key.Substring(0, Math.Min(job.Key.Length, 6)), job.Value.RequeueInterval, (job.Value.active ? (RunningJobs[job.Key] == null ? "-" : "+") : " ")));
+				}
+				return res;
+			}
+
+			/// <summary>
+			/// a string containing information about the current state of the <c>RuntimeEnvironment</c>
+			/// </summary>
+			/// <param name="which">which block you want, 0 for system, 1 for jobs, -1 for compact display (monospace LCD), -2 for list (terminal/log)</param>
+			/// <returns>the string you wanted</returns>
+			public string StatsString(int which = -1) //TODO needs more caching.
+			{
+				string res = "";
+				switch (which)
+				{
+					case 0:
+						{
+							var tmp = SystemInfoList.Get();
+							res = tmp[0];
+							for (int i = 1; i < tmp.Count; ++i)
+							{ res += "\n" + tmp[i]; }
+							break;
+						}
+					case 1:
+						{
+							var tmp = JobInfoList.Get();
+							res = tmp[0];
+							for (int i = 1; i < tmp.Count; ++i)
+							{ res += "\n" + tmp[i]; }
+							break;
+						}
+					case -1:
+						{
+							var tmp = SystemInfoList.Get();
+							res = "___ System ___";
+							foreach( var s in tmp )
+							{ res += "\n" + s; }
+							res += "\n____ Jobs ____";
+							tmp = JobInfoList.Get();
+							foreach (var s in tmp)
+							{ res += "\n" + s; }
+							break;
+						}
+					case -2:
+						{
+							var sys = SystemInfoList.Get();
+							var job = JobInfoList.Get();
+							res = string.Format("{0,11} {1,1}", "", Online ? "Online" : "Offline") + "\n";
+							res += string.Format("{0,-12} | {1,-1}", "   System", "    Jobs");
+							for(int i = 0; i < Math.Max(sys.Count,job.Count); ++i )
+							{ res += string.Format("\n{0,-12} | {1,-1}", i < sys.Count ? sys[i] : "" , i < job.Count ? job[i] : "" ); }
+							break;
+						}
+					default:
+						break;
+				}
+				return res;
+			}
+			#endregion StringHelper
+
+			#region helpers
+			/// <summary>
+			/// builds a space separated string from all arguments and Echos it. Expands enumerable types, except for string.
+			/// </summary>
+			/// <param name="things">params object array of what you want to echo. objects should have a ToString() method</param>
 			public void Echo(params object[] things)
 			{ ThisProgram.Echo( ToString(things) ); }
 
