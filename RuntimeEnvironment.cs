@@ -76,6 +76,8 @@ namespace IngameScript
 			private CachedObject<List<string>> SystemInfoList;
 			private CachedObject<List<string>> JobInfoList;
 			private Dictionary<int, CachedObject<string>> StatsStrings = new Dictionary<int, CachedObject<string>>();
+
+			public List<string> LastCommands { get; private set; } = new List<string>();
 			#endregion control vars
 			#region const vars
 			private readonly Dictionary<string, Job> Jobs;
@@ -257,6 +259,7 @@ namespace IngameScript
 				JobInfoList = new CachedObject<List<string>>(BuildJobInfoList);
 				StatsStrings[0] = new CachedObject<string>(() => BuildStatsString(0));
 				StatsStrings[1] = new CachedObject<string>(() => BuildStatsString(1));
+				StatsStrings[2] = new CachedObject<string>(() => BuildStatsString(2));
 				StatsStrings[-1] = new CachedObject<string>(() => BuildStatsString(-1));
 				StatsStrings[-2] = new CachedObject<string>(() => BuildStatsString(-2));
 
@@ -274,7 +277,7 @@ namespace IngameScript
 			}
 
 			/// <summary>
-			/// Loads the activity state and interval for jobs 
+			/// Loads the activity state and interval for jobs. <para>Should only be called once in the <c>Program()</c> ctor.</para>
 			/// </summary>
 			/// <param name="saveString">The <c>Storage</c> string that the PB API provides</param>
 			/// <returns>Success. If true, there were no errors during loading.</returns>
@@ -307,7 +310,8 @@ namespace IngameScript
 			}
 
 			/// <summary>
-			/// returns the activity and interval of all jobs encoded in a string that can be used in the <c>Save()</c> function
+			/// returns the activity and interval of all jobs encoded in a string that can be used in the <c>Save()</c> function.
+			/// <para>Should only be called once in the programs <c>Save()</c> functions</para>
 			/// </summary>
 			/// <returns>the state of the environment encoded in a string</returns>
 			public string GetSaveString()
@@ -447,16 +451,21 @@ namespace IngameScript
 				if ( CommandLine.Argument(0) == null )
 				{ return true; }
 
-				var substrings = args.Split(' ');
-
+				bool valid = false;
+				bool result = true;
 				if ( Commands.Keys.Any(x => x == CommandLine.Argument(0)) )
 				{
 					if ( Commands[CommandLine.Argument(0)].MinumumArguments < CommandLine.ArgumentCount )
 					{
-						return Commands[CommandLine.Argument(0)].Action(CommandLine);
+						result = Commands[CommandLine.Argument(0)].Action(CommandLine);
+						valid = true;
 					}
 				}
-				return true;
+				LastCommands.Add( (valid?"    ":" x  ") + args);
+				if( LastCommands.Count > 3)
+				{ LastCommands.RemoveAt(0); }
+
+				return result;
 			}
 
 			private void TryQueueJob(string name)
@@ -538,7 +547,7 @@ namespace IngameScript
 
 			private void Output(params object[] things)
 			{
-				var text = ToString(things);
+				var text = ListToString(things);
 				if (EchoState)
 				{ Echo(text); }
 				if (DisplayState)
@@ -634,7 +643,7 @@ namespace IngameScript
 				}
 			}
 
-			static public string ToString(params object[] things)
+			static public string ListToString(params object[] things)
 			{
 				if (things.Length == 1 && things[0] is string)
 				{ return things[0] as string; }
@@ -682,7 +691,7 @@ namespace IngameScript
 				const string fmtstring = "{0,-6} {1,4:0} {2,2}";
 
 				var res = new List<string>()
-				{ string.Format(fmtstring, "name", "freq", "act"), "--------------" };
+				{ string.Format(fmtstring, "name", "freq", "act"), "---------------" };
 				foreach (var job in Jobs)
 				{
 					res.Add(string.Format(fmtstring, job.Key.Substring(0, Math.Min(job.Key.Length, 6)), job.Value.RequeueInterval, (job.Value.active ? (RunningJobs[job.Key] == null ? "-" : "+") : " ")));
@@ -706,14 +715,21 @@ namespace IngameScript
 					case 1:
 						{
 							var tmp = JobInfoList.Get();
-							res = "\n____ Jobs ____";
+							res = "____ Jobs ____";
 							for (int i = 0; i < tmp.Count; ++i)
 							{ res += "\n" + tmp[i]; }
 							break;
 						}
+					case 2:
+						{
+							res = "err Command";
+							foreach( var x in LastCommands )
+							{ res += "\n" + x; }
+							break;
+						}
 					case -1:
 						{
-							res = StatsStrings[0].Get() + "\n" + StatsStrings[1].Get(); //FIXME double caching is broxed
+							res = StatsStrings[0].Get() + "\n" + StatsStrings[1].Get() + "\n" + StatsStrings[2].Get(); //FIXME double caching is broxed
 							break;
 						}
 					case -2:
@@ -724,6 +740,7 @@ namespace IngameScript
 							res += string.Format("{0,-12} | {1,-1}", "   System", "    Jobs");
 							for (int i = 0; i < Math.Max(sys.Count, job.Count); ++i)
 							{ res += string.Format("\n{0,-12} | {1,-1}", i < sys.Count ? sys[i] : "", i < job.Count ? job[i] : ""); }
+							res += "\n-------------------------------\n" + StatsStrings[2].Get();
 							break;
 						}
 					default:
@@ -747,7 +764,7 @@ namespace IngameScript
 			/// </summary>
 			/// <param name="things">params object array of what you want to echo. objects should have a ToString() method</param>
 			public void Echo(params object[] things)
-			{ ThisProgram.Echo( ToString(things) ); }
+			{ ThisProgram.Echo( ListToString(things) ); }
 
 			/// <summary>
 			/// Writes the object array to the given surfaces. All other arguments are optional
@@ -760,7 +777,7 @@ namespace IngameScript
 			public void WriteOut(IMyTextSurface surf = null, List<IMyTextSurface> l_surf = null, bool append = false, bool EchoOnFail = false, bool EndLine = true, params object[] things )
 			{
 				var badgroup = l_surf == null || !l_surf.Any();
-				string text = ToString(things) + (EndLine ? "\n" : "");
+				string text = ListToString(things) + (EndLine ? "\n" : "");
 				foreach (var thing in things)
 				{
 					if (surf != null)

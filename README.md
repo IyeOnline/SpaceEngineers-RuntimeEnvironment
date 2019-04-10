@@ -38,3 +38,7 @@ All in all, it should help you reduce the performance impact of your script.
 In the case you want to use this, but really dont want to use Malwares amazing development kit, or just dont want to use VS at all, you can still use this framework. 
 You just need to copy and paste the right parts of source code into the right places. I will leave the ugly details to you.
 )
+
+# Feature requests & bug reports
+If you have a good idea what this lib could need, or just had throw an exception in your face, open up an [issue](https://github.com/IyeOnline/SpaceEngineers-RuntimeEnvironment/issues).
+Please provide a minimal "working" example of your problem, or a pseudocode draft of your suggestion.
