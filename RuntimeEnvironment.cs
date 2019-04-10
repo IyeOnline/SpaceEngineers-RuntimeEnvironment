@@ -29,7 +29,7 @@ namespace IngameScript
 		public class RuntimeEnvironment
 		{
 			const int maxinterval = int.MaxValue - 1;
-			const int runtimeRefresh = 5000;
+			const int runtimeRefresh = 1000;
 			public const string SaveStringBegin = "RTENV";
 			public const string SaveStringEnd = "VNETR";
 			public const char SaveJobSeparator = '\u2194';
@@ -52,6 +52,7 @@ namespace IngameScript
 
 			private CachedObject<List<string>> SystemInfoList;
 			private CachedObject<List<string>> JobInfoList;
+			private Dictionary<int, CachedObject<string>> StatsStrings = new Dictionary<int, CachedObject<string>>();
 
 			private readonly Dictionary<string, Job> Jobs;
 			private Dictionary<string, IEnumerator<bool>> RunningJobs = new Dictionary<string, IEnumerator<bool>>();
@@ -92,12 +93,12 @@ namespace IngameScript
 			#region classes
 			private class CachedObject<T>
 			{
-				private bool good;
+				public bool good { get; private set; }
 				private readonly Func<T> Setter;
 				private T Data;
 
 				public CachedObject(Func<T> _Setter)
-				{ Setter = _Setter; Data = Setter(); good = true; }
+				{ good = true; Setter = _Setter; Data = Setter(); }
 
 				public T Get()
 				{ if (!good) Data = Setter(); good = true; return Data; }
@@ -195,20 +196,19 @@ namespace IngameScript
 				CurrentTickrate = RateNeededForInterval(interval);
 				EchoState = _EchoState;
 				DisplayState = _DisplayState;
-				ThisProgram.Echo(DisplayState.ToString());	
-				if(DisplayState)
+				if (DisplayState)
 				{
 					ThisProgram.Me.GetSurface(0).ContentType = ContentType.TEXT_AND_IMAGE;
 					ThisProgram.Me.GetSurface(0).WriteText("", false);
 				}
-				
+
 				Output("Creating RuntimeEnvironment...");
-				
+
 				Jobs = _Jobs;
 				Output("registered", Jobs.Count, "jobs:");
-				foreach( var job in Jobs )
+				foreach (var job in Jobs)
 				{
-					if (ForbiddenJobNames.Any( x => x == job.Key ))
+					if (ForbiddenJobNames.Any(x => x == job.Key))
 					{
 						Echo("forbidden job key \"", job.Key, "\" encountered.");
 						throw new ArgumentException();
@@ -218,11 +218,11 @@ namespace IngameScript
 					AllowToggle &= job.Value.AllowToggle;
 
 					RunningJobs.Add(job.Key, null);
-					Output("   ", job.Key); 
+					Output("   ", job.Key);
 				}
 				JobNames = Jobs.Keys.ToList();
-				
-				if( _Commands == null)
+
+				if (_Commands == null)
 				{ Commands = new Dictionary<string, Command>(); }
 				else
 				{ Commands = _Commands; }
@@ -235,25 +235,27 @@ namespace IngameScript
 						Echo("forbidden command key \"", command, "\" encountered.");
 						throw new ArgumentException();
 					}
-					Output("   ", command );
+					Output("   ", command);
 				}
-				
-				if(AllowToggle)
-				{ Commands.Add("toggle", new Command(CMD_toggle,0, UpdateType.Trigger | UpdateType.Terminal)); }
-				if(AllowFrequencyChange)
+
+				Commands.Add("run", new Command(CMD_run, 1, UpdateType.Trigger | UpdateType.Terminal));
+				if (AllowToggle)
+				{ Commands.Add("toggle", new Command(CMD_toggle, 0, UpdateType.Trigger | UpdateType.Terminal)); }
+				if (AllowFrequencyChange)
 				{ Commands.Add("frequency", new Command(CMD_freq, 1)); }
 
-				Commands.Add("run", new Command(CMD_run,1, UpdateType.Trigger | UpdateType.Terminal));
-				
-				foreach(var command in Commands.Values)
-				{
-					KnownCommandUpdateTypes |= command.UpdateType;
-				}
+				foreach (var command in Commands.Values)
+				{ KnownCommandUpdateTypes |= command.UpdateType; }
 
+				Output("building info list caches...");
 				SystemInfoList = new CachedObject<List<string>>(BuildSystemInfoList);
 				JobInfoList = new CachedObject<List<string>>(BuildJobInfoList);
+				StatsStrings[0] = new CachedObject<string>(() => BuildStatsString(0));
+				StatsStrings[1] = new CachedObject<string>(() => BuildStatsString(1));
+				StatsStrings[-1] = new CachedObject<string>(() => BuildStatsString(-1));
+				StatsStrings[-2] = new CachedObject<string>(() => BuildStatsString(-2));
 
-				if(DisplayState)
+				if (DisplayState)
 				{
 					var textsize = ThisProgram.Me.GetSurface(0).MeasureStringInPixels( new StringBuilder(StatsString(-2)), "Monospace", 1f);
 					var screensize = ThisProgram.Me.GetSurface(0).SurfaceSize;
@@ -380,6 +382,8 @@ namespace IngameScript
 
 					SystemInfoList.Invalidate();
 					JobInfoList.Invalidate();
+					foreach (var x in StatsStrings.Values)
+					{ x.Invalidate(); }
 				}
 			}
 
@@ -527,6 +531,16 @@ namespace IngameScript
 				{ ThisProgram.Runtime.UpdateFrequency = UpdateFrequency.None; }
 			}
 
+			private void Output(params object[] things)
+			{
+				var text = ToString(things);
+				if (EchoState)
+				{ Echo(text); }
+				if (DisplayState)
+				{ WriteOut(ThisProgram.Me.GetSurface(0), l_surf: null, append: true, EchoOnFail: false, EndLine: true, things: text); }
+			}
+			#endregion private functions
+
 			#region commands
 			private bool CMD_toggle(MyCommandLine commandLine)
 			{
@@ -590,17 +604,6 @@ namespace IngameScript
 			}
 			#endregion commands
 
-			private void Output(params object[] things)
-			{
-				var text = ToString(things);
-				if (EchoState)
-				{ Echo(text); }
-				if (DisplayState)
-				{ WriteOut(ThisProgram.Me.GetSurface(0), l_surf: null, append: true, EchoOnFail: false, EndLine: true, things: text); }
-			}
-
-			#endregion private functions
-
 			#region StringHelper
 			/// <summary>
 			/// a string that will be different every CurrentTick so you can tell the program is still working.
@@ -650,7 +653,6 @@ namespace IngameScript
 				}
 			}
 
-
 			private List<string> BuildSystemInfoList()
 			{
 				const string fmtstring = "{0,-7} {1,4:0.}";
@@ -683,12 +685,7 @@ namespace IngameScript
 				return res;
 			}
 
-			/// <summary>
-			/// a string containing information about the current state of the <c>RuntimeEnvironment</c>
-			/// </summary>
-			/// <param name="which">which block you want, 0 for system, 1 for jobs, -1 for compact display (monospace LCD), -2 for list (terminal/log)</param>
-			/// <returns>the string you wanted</returns>
-			public string StatsString(int which = -1) //TODO needs more caching.
+			private string BuildStatsString( int which = -1 )
 			{
 				string res = "";
 				switch (which)
@@ -696,29 +693,22 @@ namespace IngameScript
 					case 0:
 						{
 							var tmp = SystemInfoList.Get();
-							res = tmp[0];
-							for (int i = 1; i < tmp.Count; ++i)
+							res = "___ System ___";
+							for (int i = 0; i < tmp.Count; ++i)
 							{ res += "\n" + tmp[i]; }
 							break;
 						}
 					case 1:
 						{
 							var tmp = JobInfoList.Get();
-							res = tmp[0];
-							for (int i = 1; i < tmp.Count; ++i)
+							res = "\n____ Jobs ____";
+							for (int i = 0; i < tmp.Count; ++i)
 							{ res += "\n" + tmp[i]; }
 							break;
 						}
 					case -1:
 						{
-							var tmp = SystemInfoList.Get();
-							res = "___ System ___";
-							foreach( var s in tmp )
-							{ res += "\n" + s; }
-							res += "\n____ Jobs ____";
-							tmp = JobInfoList.Get();
-							foreach (var s in tmp)
-							{ res += "\n" + s; }
+							res = StatsStrings[0].Get() + "\n" + StatsStrings[1].Get(); //FIXME double caching is broxed
 							break;
 						}
 					case -2:
@@ -727,8 +717,8 @@ namespace IngameScript
 							var job = JobInfoList.Get();
 							res = string.Format("{0,11} {1,1}", "", Online ? "Online" : "Offline") + "\n";
 							res += string.Format("{0,-12} | {1,-1}", "   System", "    Jobs");
-							for(int i = 0; i < Math.Max(sys.Count,job.Count); ++i )
-							{ res += string.Format("\n{0,-12} | {1,-1}", i < sys.Count ? sys[i] : "" , i < job.Count ? job[i] : "" ); }
+							for (int i = 0; i < Math.Max(sys.Count, job.Count); ++i)
+							{ res += string.Format("\n{0,-12} | {1,-1}", i < sys.Count ? sys[i] : "", i < job.Count ? job[i] : ""); }
 							break;
 						}
 					default:
@@ -736,6 +726,14 @@ namespace IngameScript
 				}
 				return res;
 			}
+
+			/// <summary>
+			/// a string containing information about the current state of the <c>RuntimeEnvironment</c>
+			/// </summary>
+			/// <param name="which">which block you want, 0 for system, 1 for jobs, -1 for compact display (monospace LCD), -2 for list (terminal/log)</param>
+			/// <returns>the string you wanted</returns>
+			public string StatsString(int which = -1) //FIXME double caching is broxed
+			{ return StatsStrings[which].Get(); }
 			#endregion StringHelper
 
 			#region helpers
