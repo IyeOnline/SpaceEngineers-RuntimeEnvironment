@@ -31,7 +31,6 @@ namespace IngameScript
 			#region vars
 			#region const static vars
 			const int maxinterval = int.MaxValue - 1;
-			const int runtimeRefresh = 1000;
 			public const string SaveStringBegin = "RTENV";
 			public const string SaveStringEnd = "VNETR";
 			public const char SaveJobSeparator = '\u2194';
@@ -67,6 +66,7 @@ namespace IngameScript
 			public int CurrentTickrate { get; private set; } //the current update frequency
 			private int FastTick = 0; //number of consequtive fast ticks
 			private int FastTickMax = 0; //max number of consequtive fast ticks
+			private bool firstrun = true;
 
 			public double ContinousTime { get; private set; } = 0;
 			public double TimeSinceLastCall { get; private set; } = 0;
@@ -77,7 +77,7 @@ namespace IngameScript
 			private CachedObject<List<string>> JobInfoList;
 			private Dictionary<int, CachedObject<string>> StatsStrings = new Dictionary<int, CachedObject<string>>();
 
-			public List<string> LastCommands { get; private set; } = new List<string>();
+			public List<string> LastEvents { get; private set; } = new List<string>();
 			#endregion control vars
 			#region const vars
 			private readonly Dictionary<string, Job> Jobs;
@@ -378,11 +378,14 @@ namespace IngameScript
 
 					CurrentTick += FastTick > 0 ? 1 : CurrentTickrate;
 					++SymbolTick;
-					LastRuntime = ThisProgram.Runtime.LastRunTimeMs / 1000;
-					if( MaxRunTime < LastRuntime || CurrentTick % runtimeRefresh < CurrentTickrate )
-					{ MaxRunTime = LastRuntime; }
-					TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds + LastRuntime;
+					LastRuntime = ThisProgram.Runtime.LastRunTimeMs;
+					TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds * 1000 + LastRuntime;
 					ContinousTime += TimeSinceLastCall;
+
+					if ( firstrun && CurrentTick>100 )
+					{ firstrun = false; }
+					else if( !firstrun && MaxRunTime * 1.3 < LastRuntime && RunningJobs.Values.Any(x => x != null) )
+					{ MaxRunTime = LastRuntime; SaveEvent(string.Format("Jobs: ({0}) took {1:0.}ms", GetRunningJobsString(), MaxRunTime)); }
 
 					if (EchoState)
 					{ Echo(StatsString(-1)); }
@@ -461,11 +464,25 @@ namespace IngameScript
 						valid = true;
 					}
 				}
-				LastCommands.Add( (valid?"    ":" x  ") + args);
-				if( LastCommands.Count > 3)
-				{ LastCommands.RemoveAt(0); }
+
+				SaveEvent( "Command:" + (valid?"":"invalid:") + "\"" + args + "\"");
 
 				return result;
+			}
+
+			private void SaveEvent( string s )
+			{
+				LastEvents.Add(s);
+				if(LastEvents.Count > 3)
+				{ LastEvents.RemoveAt(0); }
+			}
+
+			private string GetRunningJobsString()
+			{
+				string res = "";
+				foreach (var x in RunningJobs)
+				{ if (x.Value != null) res += "," + x.Key; }
+				return res.Length == 0 ? "" : res.Substring(1);
 			}
 
 			private void TryQueueJob(string name)
@@ -680,9 +697,9 @@ namespace IngameScript
 					),
 					string.Format( "{0,-4} {1,7:0.}", "Tick", CurrentTick),
 					string.Format(fmtstring, "fast", FastTick.ToString() + "/" + FastTickMax.ToString() ),
-					string.Format(fmtstring, "Elapsed", TimeSinceLastCall * 1000d),
-					string.Format(fmtstring, "last RT", LastRuntime * 1000d),
-					string.Format(fmtstring, "max RT", MaxRunTime * 1000d),
+					string.Format(fmtstring, "Elapsed", TimeSinceLastCall),
+					string.Format(fmtstring, "last RT", LastRuntime),
+					string.Format(fmtstring, "max RT", MaxRunTime),
 				};
 			}
 
@@ -722,8 +739,8 @@ namespace IngameScript
 						}
 					case 2:
 						{
-							res = "err Command";
-							foreach( var x in LastCommands )
+							res = "Last Events:";
+							foreach( var x in LastEvents )
 							{ res += "\n" + x; }
 							break;
 						}
