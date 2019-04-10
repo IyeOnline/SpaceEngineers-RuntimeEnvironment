@@ -28,6 +28,8 @@ namespace IngameScript
 		/// <seealso cref="CurrentTick(string, UpdateType, bool)"/>
 		public class RuntimeEnvironment
 		{
+			#region vars
+			#region const static vars
 			const int maxinterval = int.MaxValue - 1;
 			const int runtimeRefresh = 1000;
 			public const string SaveStringBegin = "RTENV";
@@ -37,6 +39,27 @@ namespace IngameScript
 			private readonly List<string> ForbiddenJobNames = new List<string>() { "all" }; //strings that are used for some internal commands in the place of jobnames
 			private readonly List<string> ForbiddenCommands = new List<string>() { "toggle", "run", "frequency" }; //commands that are already provided by the environment
 
+			private readonly Dictionary<int, UpdateFrequency> intervalToFrequency = new Dictionary<int, UpdateFrequency>()
+			{
+				{ 1, UpdateFrequency.Update1 },
+				{ 10, UpdateFrequency.Update10 },
+				{ 100, UpdateFrequency.Update100 }
+			};
+			private readonly Dictionary<UpdateFrequency, string> FrequencyToString = new Dictionary<UpdateFrequency, string>()
+			{
+				{ UpdateFrequency.None, "off"},
+				{ UpdateFrequency.Once, "onc"},
+				{ UpdateFrequency.Update1, "  1"},
+				{ UpdateFrequency.Update10, " 10"},
+				{ UpdateFrequency.Update100, "100"},
+				{ UpdateFrequency.Update1 | UpdateFrequency.Once, "  1 + 1"},
+				{ UpdateFrequency.Update10 | UpdateFrequency.Once, " 10 + 1"},
+				{ UpdateFrequency.Update100 | UpdateFrequency.Once, "100 + 1"},
+				{ UpdateFrequency.Update1 | UpdateFrequency.Update10 | UpdateFrequency.Once, " 11 + 1" },
+				{ UpdateFrequency.Update1 | UpdateFrequency.Update100 | UpdateFrequency.Once, "101 + 1" }
+			};
+			#endregion const vars
+			#region control vars
 			public bool Online { get; private set; } = false; //whether the environment is currently online
 			private int CurrentTick = 0; //the current (continous) tick
 			private int SymbolTick = 0; //the current tick for the symbol output
@@ -53,7 +76,8 @@ namespace IngameScript
 			private CachedObject<List<string>> SystemInfoList;
 			private CachedObject<List<string>> JobInfoList;
 			private Dictionary<int, CachedObject<string>> StatsStrings = new Dictionary<int, CachedObject<string>>();
-
+			#endregion control vars
+			#region const vars
 			private readonly Dictionary<string, Job> Jobs;
 			private Dictionary<string, IEnumerator<bool>> RunningJobs = new Dictionary<string, IEnumerator<bool>>();
 			private readonly List<string> JobNames;
@@ -68,27 +92,8 @@ namespace IngameScript
 			private readonly UpdateType KnownCommandUpdateTypes;
 
 			public MyGridProgram ThisProgram { get; }
-
-			private readonly Dictionary<int, UpdateFrequency> intervalToFrequency = new Dictionary<int, UpdateFrequency>()
-			{
-				{ 1, UpdateFrequency.Update1 },
-				{ 10, UpdateFrequency.Update10 },
-				{ 100, UpdateFrequency.Update100 }
-			};
-
-			private readonly Dictionary<UpdateFrequency, string> FrequencyToString = new Dictionary<UpdateFrequency, string>()
-			{
-				{ UpdateFrequency.None, "off"},
-				{ UpdateFrequency.Once, "onc"},
-				{ UpdateFrequency.Update1, "  1"},
-				{ UpdateFrequency.Update10, " 10"},
-				{ UpdateFrequency.Update100, "100"},
-				{ UpdateFrequency.Update1 | UpdateFrequency.Once, "  1 + 1"},
-				{ UpdateFrequency.Update10 | UpdateFrequency.Once, " 10 + 1"},
-				{ UpdateFrequency.Update100 | UpdateFrequency.Once, "100 + 1"},
-				{ UpdateFrequency.Update1 | UpdateFrequency.Update10 | UpdateFrequency.Once, " 11 + 1" },
-				{ UpdateFrequency.Update1 | UpdateFrequency.Update100 | UpdateFrequency.Once, "101 + 1" }
-			};
+			#endregion const vars
+			#endregion vars
 
 			#region classes
 			private class CachedObject<T>
