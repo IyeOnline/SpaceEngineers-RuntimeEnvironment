@@ -31,6 +31,7 @@ namespace IngameScript
 			#region vars
 			#region const static vars
 			const int maxinterval = int.MaxValue - 1;
+			const int MaxStoredEvents = 3;
 			public const string SaveStringBegin = "RTENV";
 			public const string SaveStringEnd = "VNETR";
 			public const char SaveJobSeparator = '\u2194';
@@ -333,8 +334,9 @@ namespace IngameScript
 			/// <see cref="RuntimeEnvironment"/>
 			public void Tick(string args, UpdateType updateType, bool execute = true)
 			{
+				bool commanded = false;
 				if( (updateType & KnownCommandUpdateTypes) != 0 )
-				{ execute &= ParseArgs(args); }
+				{ execute &= ParseArgs(args); commanded = true; }
 
 				if (JobNames.Count > 0)
 				{
@@ -384,8 +386,14 @@ namespace IngameScript
 
 					if ( firstrun && CurrentTick>100 )
 					{ firstrun = false; }
-					else if( !firstrun && MaxRunTime * 1.3 < LastRuntime && RunningJobs.Values.Any(x => x != null) )
-					{ MaxRunTime = LastRuntime; SaveEvent(string.Format("Jobs: ({0}) took {1:0.}ms", GetRunningJobsString(), MaxRunTime)); }
+					else if( !firstrun && LastRuntime > MaxRunTime )
+					{
+						MaxRunTime = LastRuntime;
+						if( commanded && ( LastRuntime > MaxRunTime * 3 || LastRuntime > 5 ))
+						{ SaveEvent(string.Format("Command{0} took {1:0.}ms", execute && RunningJobs.Values.Any(x => x != null)?"+jobs":"" ,MaxRunTime)); }
+						else if (LastRuntime > MaxRunTime * 1.3 && RunningJobs.Values.Any(x => x != null))
+						{ SaveEvent(string.Format("Jobs: ({0}) took {1:0.}ms", GetRunningJobsString(), MaxRunTime)); }
+					}
 
 					if (EchoState)
 					{ Echo(StatsString(-1)); }
@@ -472,9 +480,9 @@ namespace IngameScript
 
 			private void SaveEvent( string s )
 			{
-				LastEvents.Add(s);
-				if(LastEvents.Count > 3)
-				{ LastEvents.RemoveAt(0); }
+				LastEvents.Insert(0, s);
+				if(LastEvents.Count > MaxStoredEvents)
+				{ LastEvents.RemoveAt(LastEvents.Count-1); }
 			}
 
 			private string GetRunningJobsString()
