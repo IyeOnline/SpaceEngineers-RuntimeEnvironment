@@ -222,8 +222,8 @@ namespace IngameScript
 						throw new ArgumentException();
 					}
 					job.Value.RequeueInterval = SanitizeInterval(job.Value.RequeueInterval);
-					AllowFrequencyChange &= job.Value.AllowFrequencyChange;
-					AllowToggle &= job.Value.AllowToggle;
+					AllowFrequencyChange |= job.Value.AllowFrequencyChange;
+					AllowToggle |= job.Value.AllowToggle;
 
 					RunningJobs.Add(job.Key, null);
 					Output("   ", job.Key);
@@ -255,7 +255,7 @@ namespace IngameScript
 				foreach (var command in Commands.Values)
 				{ KnownCommandUpdateTypes |= command.UpdateType; }
 
-				Output("building info list caches...");
+				Output("building caches...");
 				SystemInfoList = new CachedObject<List<string>>(BuildSystemInfoList);
 				JobInfoList = new CachedObject<List<string>>(BuildJobInfoList);
 				StatsStrings[0] = new CachedObject<string>(() => BuildStatsString(0));
@@ -761,7 +761,7 @@ namespace IngameScript
 						{
 							var sys = SystemInfoList.Get();
 							var job = JobInfoList.Get();
-							res = string.Format("{0,11} {1,1}", "", Online ? "Online" : "Offline") + "\n";
+							res = string.Format("{0,10} {1,1}", "", Online ? "Online" : "Offline") + "\n";
 							res += string.Format("{0,-12} | {1,-1}", "   System", "    Jobs");
 							for (int i = 0; i < Math.Max(sys.Count, job.Count); ++i)
 							{ res += string.Format("\n{0,-12} | {1,-1}", i < sys.Count ? sys[i] : "", i < job.Count ? job[i] : ""); }
