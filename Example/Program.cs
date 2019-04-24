@@ -37,7 +37,7 @@ namespace IngameScript
 			//Echo("-+-+-");
 			yield return true; //the job will be "paused" here until the next tick
 			//Echo("+-+-+");
-			yield return true;
+			//once the end is reached, the job will be done.
 		}
 
 		/// <summary>
