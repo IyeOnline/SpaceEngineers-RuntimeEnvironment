@@ -68,6 +68,7 @@ namespace IngameScript
 			private int FastTick = 0; //number of consequtive fast ticks
 			private int FastTickMax = 0; //max number of consequtive fast ticks
 			private bool firstrun = true;
+            private string LastRunJobs = "";
 
 			public double ContinousTime { get; private set; } = 0;
 			public double TimeSinceLastCall { get; private set; } = 0;
@@ -282,6 +283,7 @@ namespace IngameScript
 			/// </summary>
 			/// <param name="saveString">The <c>Storage</c> string that the PB API provides</param>
 			/// <returns>Success. If true, there were no errors during loading.</returns>
+            /// <seealso cref="GetSaveString"/>
 			public bool LoadFromString( string saveString )
 			{
 				if (saveString == null || saveString.Length < SaveStringBegin.Length + SaveStringEnd.Length)
@@ -315,6 +317,7 @@ namespace IngameScript
 			/// <para>Should only be called once in the programs <c>Save()</c> functions</para>
 			/// </summary>
 			/// <returns>the state of the environment encoded in a string</returns>
+            /// <seealso cref="LoadFromString(string)"/>
 			public string GetSaveString()
 			{
 				string saveString = SaveStringBegin;
@@ -391,8 +394,8 @@ namespace IngameScript
 						MaxRunTime = LastRuntime;
 						if( commanded && ( LastRuntime > MaxRunTime * 3 || LastRuntime > 5 ))
 						{ SaveEvent(string.Format("Command{0} took {1:0.}ms", execute && RunningJobs.Values.Any(x => x != null)?"+jobs":"" ,MaxRunTime)); }
-						else if (LastRuntime > MaxRunTime * 1.3 && RunningJobs.Values.Any(x => x != null))
-						{ SaveEvent(string.Format("Jobs: ({0}) took {1:0.}ms", GetRunningJobsString(), MaxRunTime)); }
+						else if (LastRuntime > MaxRunTime * 1.3 )
+						{ SaveEvent(string.Format("Jobs: ({0}) took {1:0.}ms", LastRunJobs, MaxRunTime)); }
 					}
 
 					if (EchoState)
@@ -485,14 +488,6 @@ namespace IngameScript
 				{ LastEvents.RemoveAt(LastEvents.Count-1); }
 			}
 
-			private string GetRunningJobsString()
-			{
-				string res = "";
-				foreach (var x in RunningJobs)
-				{ if (x.Value != null) res += "," + x.Key; }
-				return res.Length == 0 ? "" : res.Substring(1);
-			}
-
 			private void TryQueueJob(string name)
 			{
 				if (Jobs.ContainsKey(name))
@@ -507,6 +502,7 @@ namespace IngameScript
 
 			private void ProcessRunningJobs()
 			{
+                LastRunJobs = "";
 				foreach( var job in JobNames )
 				{
 					if( RunningJobs[job] != null )
@@ -516,8 +512,10 @@ namespace IngameScript
 							RunningJobs[job].Dispose();
 							RunningJobs[job] = null;
 						}
+                        LastRunJobs += job + ",";
 					}
 				}
+                LastRunJobs = LastRunJobs.Substring(Math.Min(1,LastRunJobs.Length));
 			}
 
 			private static int SanitizeInterval(int interval)
@@ -654,17 +652,18 @@ namespace IngameScript
 				{ return "--PAUSED--"; }
 				switch (SymbolTick % 10)
 				{
-					case 0: return "|---------";
-					case 1: return "-|--------";
-					case 2: return "--|-------";
-					case 3: return "---|------";
-					case 4: return "----|-----";
-					case 5: return "-----|----";
-					case 6: return "------|---";
-					case 7: return "-------|--";
-					case 8: return "--------|-";
-					case 9: return "---------|";
-					default: return "the static analyzer is stupid";
+					case 0: return "|----------";
+					case 1: return "-|---------";
+					case 2: return "--|--------";
+					case 3: return "---|-------";
+					case 4: return "----|------";
+					case 5: return "-----|-----";
+					case 6: return "------|----";
+					case 7: return "-------|---";
+					case 8: return "--------|--";
+					case 9: return "---------|-";
+                    case 10: return "----------|";
+                    default: return "the static analyzer is stupid";
 				}
 			}
 
@@ -754,7 +753,7 @@ namespace IngameScript
 						}
 					case -1:
 						{
-							res = StatsStrings[0].Get() + "\n" + StatsStrings[1].Get() + "\n" + StatsStrings[2].Get(); //FIXME double caching is broxed
+							res = StatsStrings[0].Get() + "\n" + StatsStrings[1].Get() + "\n" + StatsStrings[2].Get();
 							break;
 						}
 					case -2:
@@ -779,7 +778,7 @@ namespace IngameScript
 			/// </summary>
 			/// <param name="which">which block you want, 0 for system, 1 for jobs, -1 for compact display (monospace LCD), -2 for list (terminal/log)</param>
 			/// <returns>the string you wanted</returns>
-			public string StatsString(int which = -1) //FIXME double caching is broxed
+			public string StatsString(int which = -1)
 			{ return StatsStrings[which].Get(); }
 			#endregion StringHelper
 
