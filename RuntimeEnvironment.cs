@@ -25,7 +25,8 @@ namespace IngameScript
 		/// <para>See the Example.cs file for basic information on the usage</para>
 		/// </summary>
 		/// <seealso cref="Job"/>
-		/// <seealso cref="CurrentTick(string, UpdateType, bool)"/>
+        /// <seealso cref="Command"/>
+		/// <seealso cref="Tick(string, UpdateType, bool)"/>
 		public class RuntimeEnvironment
 		{
 			#region vars

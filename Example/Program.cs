@@ -37,7 +37,7 @@ namespace IngameScript
             Echo("-+-+-");
             yield return true; //the job will be "paused" here until the next tick
             Echo("+-+-+");
-            yield return false; //a "yield return false;" will end the job right away. Here it is pointless as the end of the function will be reached.
+            yield break; //a "yield break;" will end the job right away. Here it is pointless as the end of the function will be reached.
             //this section of code would never be reached.
             //however, you do not need to end with "yield return false;"
             //once the end of the function body is reached, the job will be done in any case.
