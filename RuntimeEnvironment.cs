@@ -33,6 +33,7 @@ namespace IngameScript
 			#region const static vars
 			const int maxinterval = int.MaxValue - 1;
 			const int MaxStoredEvents = 3;
+			const double MaxTolerableRuntime = 10;
 			public const string SaveStringBegin = "RTENV";
 			public const string SaveStringEnd = "VNETR";
 			public const char SaveJobSeparator = '\u2194';
@@ -75,6 +76,7 @@ namespace IngameScript
 			public double TimeSinceLastCall { get; private set; } = 0;
 			public double LastRuntime { get; private set; } = 0;
 			public double MaxRunTime { get; private set; } = 0;
+			public double AverageRuntime { get; private set; } = 0;
 
 			private CachedObject<List<string>> SystemInfoList;
 			private CachedObject<List<string>> JobInfoList;
@@ -398,19 +400,22 @@ namespace IngameScript
 					CurrentTick += FastTick > 0 ? 1 : CurrentTickrate;
 					++SymbolTick;
 					LastRuntime = ThisProgram.Runtime.LastRunTimeMs;
+					if ( !commanded )
+					{ AverageRuntime = (LastRuntime + (SymbolTick - 1) * AverageRuntime) / SymbolTick; }
 					TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds * 1000 + LastRuntime;
 					ContinousTime += TimeSinceLastCall;
 
-					
-					if( !firstrun && LastRuntime > MaxRunTime )
+					if ( !firstrun && LastRuntime > MaxRunTime )
 					{
-						MaxRunTime = LastRuntime;
-						if( commanded && ( LastRuntime > MaxRunTime * 3 || LastRuntime > 5 ) )
-						{ SaveEvent(string.Format("Command{0} took {1:0.}ms", execute && RunningJobs.Values.Any(x => x != null)?"+jobs":"" ,MaxRunTime)); }
-						else if (LastRuntime > MaxRunTime )
+						if( !commanded )
+						{ MaxRunTime = LastRuntime; }
+
+						if( commanded && (LastRuntime > MaxTolerableRuntime || LastRuntime > MaxRunTime * 3 ) )
+						{ SaveEvent(string.Format("Command{0} took {1:0.}ms", execute && RunningJobs.Values.Any(x => x != null)?"+Jobs:("+LastRunJobs+")":"" ,MaxRunTime)); }
+						else if( LastRuntime > MaxTolerableRuntime || LastRuntime > MaxRunTime * 1.3 )
 						{ SaveEvent(string.Format("Jobs: ({0}) took {1:0.}ms", LastRunJobs, MaxRunTime)); }
 					}
-					else if ( CurrentTick > 10)
+					else if ( CurrentTick > 10 )
 					{ firstrun = false; }
 
 					if (EchoState)
@@ -527,7 +532,7 @@ namespace IngameScript
                         LastRunJobs += job + ",";
 					}
 				}
-                LastRunJobs = LastRunJobs.Substring(Math.Min(1,LastRunJobs.Length));
+				LastRunJobs = LastRunJobs.Substring(0, Math.Max(LastRunJobs.Length-1,0));
 			}
 
 			private static int SanitizeInterval(int interval)
@@ -705,7 +710,7 @@ namespace IngameScript
 
 			private List<string> BuildSystemInfoList()
 			{
-				const string fmtstring = "{0,-7} {1,4:0.}";
+				const string fmtstring = "{0,-7} {1,4:0.#}";
 
 				return new List<string>()
 				{
@@ -716,9 +721,10 @@ namespace IngameScript
 					),
 					string.Format( "{0,-4} {1,7:0.}", "Tick", CurrentTick),
 					string.Format(fmtstring, "fast", FastTick.ToString() + "/" + FastTickMax.ToString() ),
-					string.Format(fmtstring, "Elapsed", TimeSinceLastCall),
-					string.Format(fmtstring, "last RT", LastRuntime),
-					string.Format(fmtstring, "max RT", MaxRunTime),
+					string.Format(fmtstring, "Elapsed", (int)TimeSinceLastCall),
+					string.Format(fmtstring, " max RT", MaxRunTime),
+					string.Format(fmtstring, " avg RT", AverageRuntime),
+					string.Format(fmtstring, "last RT", LastRuntime)
 				};
 			}
 
