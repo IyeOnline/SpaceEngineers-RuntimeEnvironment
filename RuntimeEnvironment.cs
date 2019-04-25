@@ -401,16 +401,17 @@ namespace IngameScript
 					TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds * 1000 + LastRuntime;
 					ContinousTime += TimeSinceLastCall;
 
-					if ( firstrun && CurrentTick>100 )
-					{ firstrun = false; }
-					else if( !firstrun && LastRuntime > MaxRunTime )
+					
+					if( !firstrun && LastRuntime > MaxRunTime )
 					{
 						MaxRunTime = LastRuntime;
-						if( commanded && ( LastRuntime > MaxRunTime * 3 || LastRuntime > 5 ))
+						if( commanded && ( LastRuntime > MaxRunTime * 3 || LastRuntime > 5 ) )
 						{ SaveEvent(string.Format("Command{0} took {1:0.}ms", execute && RunningJobs.Values.Any(x => x != null)?"+jobs":"" ,MaxRunTime)); }
-						else if (LastRuntime > MaxRunTime * 1.3 )
+						else if (LastRuntime > MaxRunTime )
 						{ SaveEvent(string.Format("Jobs: ({0}) took {1:0.}ms", LastRunJobs, MaxRunTime)); }
 					}
+					else if ( CurrentTick > 10)
+					{ firstrun = false; }
 
 					if (EchoState)
 					{ Echo(StatsString(-1)); }
@@ -504,13 +505,10 @@ namespace IngameScript
 
 			private void TryQueueJob(string name)
 			{
-				if (Jobs.ContainsKey(name))
+				if (Jobs.ContainsKey(name) && RunningJobs[name] == null)
 				{
-					if (RunningJobs[name] == null)
-					{
-						RunningJobs[name] = Jobs[name].Action();
-						Online = true;
-					}
+					RunningJobs[name] = Jobs[name].Action();
+					Online = true;
 				}
 			}
 
