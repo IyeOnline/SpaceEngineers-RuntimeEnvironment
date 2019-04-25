@@ -211,23 +211,27 @@ namespace IngameScript
 					ThisProgram.Me.GetSurface(0).WriteText("", false);
 				}
 
-				Output("Creating RuntimeEnvironment...");
+				Output(things:"Creating RuntimeEnvironment...");
 
 				Jobs = _Jobs;
-				Output("registered", Jobs.Count, "jobs:");
+				Output(things: "  registering jobs...");
 				foreach (var job in Jobs)
 				{
-					if (ForbiddenJobNames.Any(x => x == job.Key))
+                    Output(EndLine: false, things: "    " + job.Key);
+                    if (ForbiddenJobNames.Any(x => x == job.Key))
 					{
-						Echo("forbidden job key \"", job.Key, "\" encountered.");
+                        Output(things: " ERROR");
+                        Echo("forbidden job key \"", job.Key, "\" encountered.");
 						throw new ArgumentException();
 					}
+                    else
+                    { Output(things: " OK"); }
+
 					job.Value.RequeueInterval = SanitizeInterval(job.Value.RequeueInterval);
 					AllowFrequencyChange |= job.Value.AllowFrequencyChange;
 					AllowToggle |= job.Value.AllowToggle;
 
 					RunningJobs.Add(job.Key, null);
-					Output("   ", job.Key);
 				}
 				JobNames = Jobs.Keys.ToList();
 
@@ -236,15 +240,18 @@ namespace IngameScript
 				else
 				{ Commands = _Commands; }
 
-				Output("registered", Commands.Count, "commands:");
+				Output(things: "  registering commands..." );
 				foreach (var command in Commands.Keys)
 				{
-					if (ForbiddenCommands.Any(x => x == command))
+                    Output(EndLine: false,things: "    " + command);
+                    if (ForbiddenCommands.Any(x => x == command))
 					{
+                        Output(things: " ERROR");
 						Echo("forbidden command key \"", command, "\" encountered.");
-						throw new ArgumentException();
+                        throw new ArgumentException();
 					}
-					Output("   ", command);
+                    else
+                    { Output(things: " OK"); }
 				}
 
 				Commands.Add("run", new Command(CMD_run, 1, UpdateType.Trigger | UpdateType.Terminal));
@@ -256,7 +263,7 @@ namespace IngameScript
 				foreach (var command in Commands.Values)
 				{ KnownCommandUpdateTypes |= command.UpdateType; }
 
-				Output("building caches...");
+				Output(EndLine: false, things: "  building caches..." );
 				SystemInfoList = new CachedObject<List<string>>(BuildSystemInfoList);
 				JobInfoList = new CachedObject<List<string>>(BuildJobInfoList);
 				StatsStrings[0] = new CachedObject<string>(() => BuildStatsString(0));
@@ -264,8 +271,9 @@ namespace IngameScript
 				StatsStrings[2] = new CachedObject<string>(() => BuildStatsString(2));
 				StatsStrings[-1] = new CachedObject<string>(() => BuildStatsString(-1));
 				StatsStrings[-2] = new CachedObject<string>(() => BuildStatsString(-2));
+                Output(EndLine: true, things: "Done!");
 
-				if (DisplayState)
+                if (DisplayState)
 				{
 					var textsize = ThisProgram.Me.GetSurface(0).MeasureStringInPixels( new StringBuilder(StatsString(-2)), "Monospace", 1f);
 					var screensize = ThisProgram.Me.GetSurface(0).SurfaceSize;
@@ -275,7 +283,7 @@ namespace IngameScript
 					ThisProgram.Me.GetSurface(0).Font = "Monospace";
 				}
 
-				Output("Done Creating RuntimeEnvironment");
+				Output(things: "Done Creating RuntimeEnvironment");
 			}
 
 			/// <summary>
@@ -286,8 +294,9 @@ namespace IngameScript
             /// <seealso cref="GetSaveString"/>
 			public bool LoadFromString( string saveString )
 			{
+                Output(EndLine:false, things: "Loading..." );
 				if (saveString == null || saveString.Length < SaveStringBegin.Length + SaveStringEnd.Length)
-				{ return false; }
+                { Output(EndLine: true, things: "no valid save"); return false; }
 				int pStart = saveString.IndexOf(SaveStringBegin) + SaveStringBegin.Length;
 				int pEnd = saveString.LastIndexOf(SaveJobSeparator + SaveStringEnd);
 				string[] states = saveString.Substring(pStart, pEnd - pStart).Split(SaveJobSeparator);
@@ -297,16 +306,20 @@ namespace IngameScript
 					string[] info = jobstring.Split(SaveInfoSeparator);
 					int i = 0;
 					bool active = false;
-					if (JobNames.Contains(info[0]) && int.TryParse(info[1], out i) && bool.TryParse(info[2], out active) )
-					{
-						Jobs[info[0]].RequeueInterval = i;
-						Jobs[info[0]].active = active;
-					}
-					else
-					{ return false; }
+                    if (JobNames.Contains(info[0]) && int.TryParse(info[1], out i) && bool.TryParse(info[2], out active))
+                    {
+                        Jobs[info[0]].RequeueInterval = i;
+                        Jobs[info[0]].active = active;
+                    }
+                    else
+                    {
+                        Output(EndLine: true, things: new object[]{"failed at stored info for", info[0], "\n\tEither an unknown job or corrputed data."} );
+                        return false;
+                    }
 				}
+                Output(EndLine: true, things: "Done!" );
 
-				UpdateOnline();
+                UpdateOnline();
 				UpdateInterval();
 
 				return true;
@@ -568,13 +581,13 @@ namespace IngameScript
 				{ ThisProgram.Runtime.UpdateFrequency = UpdateFrequency.None; }
 			}
 
-			private void Output(params object[] things)
+            private void Output( bool EndLine = true, params object[] things)
 			{
 				var text = ListToString(things);
 				if (EchoState)
 				{ Echo(text); }
 				if (DisplayState)
-				{ WriteOut(ThisProgram.Me.GetSurface(0), l_surf: null, append: true, EchoOnFail: false, EndLine: true, things: text); }
+				{ WriteOut(ThisProgram.Me.GetSurface(0), l_surf: null, append: true, EchoOnFail: false, EndLine: EndLine, things: text); }
 			}
 			#endregion private functions
 
@@ -650,7 +663,7 @@ namespace IngameScript
 			{
 				if (!Online)
 				{ return "--PAUSED--"; }
-				switch (SymbolTick % 10)
+				switch (SymbolTick % 11)
 				{
 					case 0: return "|----------";
 					case 1: return "-|---------";

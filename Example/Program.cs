@@ -34,23 +34,26 @@ namespace IngameScript
 		/// </summary>
 		public IEnumerator<bool> MyJobFunction()
 		{
-			//Echo("-+-+-");
-			yield return true; //the job will be "paused" here until the next tick
-			//Echo("+-+-+");
-			//once the end is reached, the job will be done.
-		}
+            Echo("-+-+-");
+            yield return true; //the job will be "paused" here until the next tick
+            Echo("+-+-+");
+            yield return false; //a "yield return false;" will end the job right away. Use this from jobs that only have one state.
+            //this section of code would never be reached.
+            //however, you do not need to end with "yield return false;"
+            //once the end of the function body is reached, the job will be done in any case.
+        }
 
-		/// <summary>
-		/// the function that will be run when we give the command
-		/// </summary>
-		/// <param name="commandline">A <c>MyCommandLine</c> object, that contains the parsed arguments that Main/Tick got.
-		/// <para>See https://github.com/malware-dev/MDK-SE/wiki/VRage.Game.ModAPI.Ingame.Utilities.MyCommandLine </para>
-		/// </param>
-		/// <returns>whether the script should still execute jobs in this tick</returns>
-		public bool MyCommandFunction(MyCommandLine commandline)
+        /// <summary>
+        /// the function that will be run when we give the command
+        /// </summary>
+        /// <param name="commandline">A <c>MyCommandLine</c> object, that contains the parsed arguments that Main/Tick got.
+        /// <para>See https://github.com/malware-dev/MDK-SE/wiki/VRage.Game.ModAPI.Ingame.Utilities.MyCommandLine </para>
+        /// </param>
+        /// <returns>whether the script should still execute jobs in this tick</returns>
+        public bool MyCommandFunction(MyCommandLine commandline)
 		{
 			//this is your command functions body. Note that because its decladed in the body of the Program class, it has access to the RuntimeEnvironemnt and can use its members
-			Env.Echo("there were", commandline.ArgumentCount, "arguments:");//This version of echo is capable of expanding argument lists
+			Env.Echo("there were", commandline.ArgumentCount, "arguments:");    //This version of echo is capable of expanding argument lists
 			foreach (var x in commandline.Items)
 			{ Env.Echo(x); }
 			return true; //If you return true, the Command will still process any active jobs in the Tick
@@ -89,13 +92,27 @@ namespace IngameScript
 
 			// create the Environment with a reference to the Program
 			Env = new RuntimeEnvironment(
-				_ThisProgram: this, //you need to hand over a reference to the calling program so the environment can control frequencies
-				_Jobs: jobDict, //the dictionary you created above
+				_ThisProgram: this,     //you need to hand over a reference to the calling program so the environment can control frequencies
+				_Jobs: jobDict,         //the dictionary you created above
 				_Commands: commandDict, //OPTIONAL: the command dict you created above
-				_EchoState : true, //OPTIONAL, default false: whether the enviroment should display its state in the terminal every tick
-				_DisplayState: true //OPTIONAL, default false: whether the enviroment should display its state on the running PBs screen every tick
+				_EchoState : true,      //OPTIONAL, default false: whether the enviroment should display its state in the terminal every tick
+				_DisplayState: true     //OPTIONAL, default false: whether the enviroment should display its state on the running PBs screen every tick
 			);
+
+            //the environment can load its state from the PBs internal Storage String, assuming you did save it.
+            Echo("test");
+            Env.LoadFromString(Storage);
 		}
+
+        /// <summary>
+        /// this function is called everytime the world is saved. The <c>Storage</c> string allows you to save the state of your program. The environment provides a way to save and load its state
+        /// </summary>
+        /// <see cref="RuntimeEnvironment.LoadFromString(string)"/>
+        /// <see cref="RuntimeEnvironment.GetSaveString()"/>
+        void Save()
+        {
+            Storage = "some stuff you want to save" + Env.GetSaveString() + "more stuff you want to save"; // The environment does guard its own storage, so you dont have to worry about it getting corrupted.
+        }
 
 		/// <summary>
 		/// your main function. ideally when using the environment you dont want it to look any different from this.
