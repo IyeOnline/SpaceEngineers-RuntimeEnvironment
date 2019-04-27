@@ -77,6 +77,7 @@ namespace IngameScript
 			public double LastRuntime { get; private set; } = 0;
 			public double MaxRunTime { get; private set; } = 0;
 			public double AverageRuntime { get; private set; } = 0;
+			private int commanded = 0;
 
 			private CachedObject<List<string>> SystemInfoList;
 			private CachedObject<List<string>> JobInfoList;
@@ -353,9 +354,8 @@ namespace IngameScript
 			/// <see cref="RuntimeEnvironment"/>
 			public void Tick(string args, UpdateType updateType, bool execute = true)
 			{
-				bool commanded = false;
 				if( (updateType & KnownCommandUpdateTypes) != 0 )
-				{ execute &= ParseArgs(args); commanded = true; }
+				{ execute &= ParseArgs(args); commanded = 2; }
 
 				if (JobNames.Count > 0)
 				{
@@ -366,9 +366,7 @@ namespace IngameScript
 							foreach (var job in Jobs)
 							{
 								if (job.Value.active && CurrentTick % job.Value.RequeueInterval == 0)
-								{
-									TryQueueJob(job.Key);
-								}
+								{ TryQueueJob(job.Key); }
 							}
 						}
 
@@ -400,17 +398,17 @@ namespace IngameScript
 					CurrentTick += FastTick > 0 ? 1 : CurrentTickrate;
 					++SymbolTick;
 					LastRuntime = ThisProgram.Runtime.LastRunTimeMs;
-					if ( !commanded )
+					if ( commanded == 0)
 					{ AverageRuntime = (LastRuntime + (SymbolTick - 1) * AverageRuntime) / SymbolTick; }
 					TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds * 1000 + LastRuntime;
 					ContinousTime += TimeSinceLastCall;
 
 					if ( !firstrun && LastRuntime > MaxRunTime )
 					{
-						if( !commanded )
+						if( commanded == 0 )
 						{ MaxRunTime = LastRuntime; }
 
-						if( commanded && (LastRuntime > MaxTolerableRuntime || LastRuntime > MaxRunTime * 3 ) )
+						if( commanded != 0 && (LastRuntime > MaxTolerableRuntime || LastRuntime > MaxRunTime * 3 ) )
 						{ SaveEvent(string.Format("Command{0} took {1:0.}ms", execute && RunningJobs.Values.Any(x => x != null)?"+Jobs:("+LastRunJobs+")":"" ,MaxRunTime)); }
 						else if( LastRuntime > MaxTolerableRuntime || LastRuntime > MaxRunTime * 1.3 )
 						{ SaveEvent(string.Format("Jobs: ({0}) took {1:0.}ms", LastRunJobs, MaxRunTime)); }
@@ -427,6 +425,8 @@ namespace IngameScript
 					JobInfoList.Invalidate();
 					foreach (var x in StatsStrings.Values)
 					{ x.Invalidate(); }
+
+					commanded -= commanded > 0 ? 1 : 0;
 				}
 			}
 
