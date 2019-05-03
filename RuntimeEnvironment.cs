@@ -39,7 +39,7 @@ namespace IngameScript
 			public const char SaveJobSeparator = '\u2194';
 			public const char SaveInfoSeparator = ' ';
 			private readonly List<string> ForbiddenJobNames = new List<string>() { "all" }; //strings that are used for some internal commands in the place of jobnames
-			private readonly List<string> ForbiddenCommands = new List<string>() { "toggle", "run", "frequency" }; //commands that are already provided by the environment
+			private readonly List<string> ForbiddenCommands = new List<string>() { "toggle", "run", "frequency", "evaluate" }; //commands that are already provided by the environment
 
 			private readonly Dictionary<int, UpdateFrequency> intervalToFrequency = new Dictionary<int, UpdateFrequency>()
 			{
@@ -79,6 +79,12 @@ namespace IngameScript
 			public double AverageRuntime { get; private set; } = 0;
 			private int commanded = 0;
 
+			private string EvaluatedJob = "";
+			private bool Evaluating = false;
+			private bool EvaluationDone = true;
+			private int EvaluatingState = -1;
+			private Dictionary<string, List<double>> Timings = new Dictionary<string, List<double>>();
+
 			private CachedObject<List<string>> SystemInfoList;
 			private CachedObject<List<string>> JobInfoList;
 			private Dictionary<int, CachedObject<string>> StatsStrings = new Dictionary<int, CachedObject<string>>();
@@ -106,18 +112,18 @@ namespace IngameScript
 			#region classes
 			private class CachedObject<T>
 			{
-				public bool good { get; private set; }
+				public bool Good { get; private set; }
 				private readonly Func<T> Setter;
 				private T Data;
 
 				public CachedObject(Func<T> _Setter)
-				{ good = true; Setter = _Setter; Data = Setter(); }
+				{ Good = true; Setter = _Setter; Data = Setter(); }
 
 				public T Get()
-				{ if (!good) Data = Setter(); good = true; return Data; }
+				{ if (!Good) Data = Setter(); Good = true; return Data; }
 
 				public void Invalidate()
-				{ good = false; }
+				{ Good = false; }
 			}
 
 			/// <summary>
@@ -218,7 +224,14 @@ namespace IngameScript
 				Output(things:"Creating RuntimeEnvironment...");
 
 				Jobs = _Jobs;
-				Output(things: "  registering jobs...");
+				Output(EndLine: false, things: "  registering jobs...");
+				if( !Jobs.Any() )
+				{
+					Output(EndLine: true, things: " ERROR");
+					throw new Exception("No Jobs provided!");
+				}
+				else
+				{ Output(EndLine: true, things: ""); }
 				foreach (var job in Jobs)
 				{
                     Output(EndLine: false, things: "    " + job.Key);
@@ -226,10 +239,12 @@ namespace IngameScript
 					{
                         Output(things: " ERROR");
                         Echo("forbidden job key \"", job.Key, "\" encountered.");
-						throw new ArgumentException();
+						throw new Exception("forbidden job key \"" + job.Key + "\" encountered.");
 					}
                     else
                     { Output(things: " OK"); }
+
+					Timings.Add(job.Key, new List<double>());
 
 					job.Value.RequeueInterval = SanitizeInterval(job.Value.RequeueInterval);
 					AllowFrequencyChange |= job.Value.AllowFrequencyChange;
@@ -244,7 +259,11 @@ namespace IngameScript
 				else
 				{ Commands = _Commands; }
 
-				Output(things: "  registering commands..." );
+				Output(EndLine: false, things: "  registering commands..." );
+				if(!Commands.Any())
+				{ Output(EndLine: true, things: " None"); }
+				else
+				{ Output(EndLine: true, things: ""); }
 				foreach (var command in Commands.Keys)
 				{
                     Output(EndLine: false,things: "    " + command);
@@ -252,13 +271,14 @@ namespace IngameScript
 					{
                         Output(things: " ERROR");
 						Echo("forbidden command key \"", command, "\" encountered.");
-                        throw new ArgumentException();
+                        throw new Exception("forbidden command key \"" + command + "\" encountered.");
 					}
                     else
                     { Output(things: " OK"); }
 				}
 
 				Commands.Add("run", new Command(CMD_run, 1, UpdateType.Trigger | UpdateType.Terminal));
+				Commands.Add("evaluate", new Command(CMD_evaluate, 1, UpdateType.Terminal));
 				if (AllowToggle)
 				{ Commands.Add("toggle", new Command(CMD_toggle, 0, UpdateType.Trigger | UpdateType.Terminal)); }
 				if (AllowFrequencyChange)
@@ -273,6 +293,7 @@ namespace IngameScript
 				StatsStrings[0] = new CachedObject<string>(() => BuildStatsString(0));
 				StatsStrings[1] = new CachedObject<string>(() => BuildStatsString(1));
 				StatsStrings[2] = new CachedObject<string>(() => BuildStatsString(2));
+				StatsStrings[3] = new CachedObject<string>(() => BuildStatsString(3));
 				StatsStrings[-1] = new CachedObject<string>(() => BuildStatsString(-1));
 				StatsStrings[-2] = new CachedObject<string>(() => BuildStatsString(-2));
                 Output(EndLine: true, things: "Done!");
@@ -357,77 +378,95 @@ namespace IngameScript
 				if( (updateType & KnownCommandUpdateTypes) != 0 )
 				{ execute &= ParseArgs(args); commanded = 2; }
 
-				if (JobNames.Count > 0)
+				if ( (Online && execute ) || Evaluating )
 				{
-					if (Online && execute)
+					if (!Evaluating && CurrentTick % interval == 0)
 					{
-						if (CurrentTick % interval == 0)
+						foreach (var job in Jobs)
 						{
-							foreach (var job in Jobs)
-							{
-								if (job.Value.active && CurrentTick % job.Value.RequeueInterval == 0)
-								{ TryQueueJob(job.Key); }
-							}
+							if (job.Value.active && CurrentTick % job.Value.RequeueInterval == 0)
+							{ TryQueueJob(job.Key); }
 						}
+					}
 
-						ProcessRunningJobs();
+					ProcessRunningJobs();
 
-						bool hasstates = false;
-						foreach (var name in JobNames)
+					bool hasstates = false;
+					foreach (var name in JobNames)
+					{
+						if ( EvaluatingState > -1 || (!Jobs[name].lazy && RunningJobs[name] != null )  ) //TODO optimize this
 						{
-							if ( !Jobs[name].lazy && RunningJobs[name] != null)
-							{
-								hasstates = true;
-								++FastTick;
-								if(FastTick>FastTickMax)
-								{ ++FastTickMax; }
-								if ((ThisProgram.Runtime.UpdateFrequency & UpdateFrequency.Update1) == 0)
-								{ ThisProgram.Runtime.UpdateFrequency |= UpdateFrequency.Once; }
-								break;
-							}
+							hasstates = true;
+							++FastTick;
+							if(FastTick>FastTickMax)
+							{ ++FastTickMax; }
+							if ((ThisProgram.Runtime.UpdateFrequency & UpdateFrequency.Update1) == 0 )
+							{ ThisProgram.Runtime.UpdateFrequency |= UpdateFrequency.Once; }
+							break;
 						}
+					}
 
-						if (!hasstates)
+					if (!hasstates)
+					{
+						FastTick = 0;
+						SyncTick();
+						UpdateOnline();
+					}
+				}
+
+				CurrentTick += FastTick > 0 ? 1 : CurrentTickrate;
+				++SymbolTick;
+				LastRuntime = ThisProgram.Runtime.LastRunTimeMs;
+				if ( commanded == 0)
+				{ AverageRuntime = (LastRuntime + (SymbolTick - 1) * AverageRuntime) / SymbolTick; }
+				TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds * 1000 + LastRuntime;
+				ContinousTime += TimeSinceLastCall;
+
+				if (Evaluating)
+				{
+					if (RunningJobs.Values.All(x => x == null))
+					{
+						Timings[EvaluatedJob].Clear();
+						TryQueueJob(EvaluatedJob);
+						EvaluatingState = 0;
+					}
+					else if (EvaluatingState > -1)
+					{
+						Timings[EvaluatedJob].Add(LastRuntime);
+						if (EvaluationDone)
 						{
-							FastTick = 0;
-							SyncTick();
+							Evaluating = false;
+							EvaluatingState = -1;
+							EvaluatedJob = "";
 							UpdateOnline();
 						}
+						EvaluationDone = RunningJobs[EvaluatedJob] == null;
 					}
-
-					CurrentTick += FastTick > 0 ? 1 : CurrentTickrate;
-					++SymbolTick;
-					LastRuntime = ThisProgram.Runtime.LastRunTimeMs;
-					if ( commanded == 0)
-					{ AverageRuntime = (LastRuntime + (SymbolTick - 1) * AverageRuntime) / SymbolTick; }
-					TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds * 1000 + LastRuntime;
-					ContinousTime += TimeSinceLastCall;
-
-					if ( !firstrun && LastRuntime > MaxRunTime )
-					{
-						if( commanded == 0 )
-						{ MaxRunTime = LastRuntime; }
-
-						if( commanded != 0 && (LastRuntime > MaxTolerableRuntime || LastRuntime > MaxRunTime * 3 ) )
-						{ SaveEvent(string.Format("Command{0} took {1:0.}ms", execute && RunningJobs.Values.Any(x => x != null)?"+Jobs:("+LastRunJobs+")":"" ,MaxRunTime)); }
-						else if( LastRuntime > MaxTolerableRuntime || LastRuntime > MaxRunTime * 1.3 )
-						{ SaveEvent(string.Format("Jobs: ({0}) took {1:0.}ms", LastRunJobs, MaxRunTime)); }
-					}
-					else if ( CurrentTick > 10 )
-					{ firstrun = false; }
-
-					if (EchoState)
-					{ Echo(StatsString(-1)); }
-					if (DisplayState && CurrentTick % 10 == 0 )
-					{ WriteOut(ThisProgram.Me.GetSurface(0), l_surf: null, append: false, EchoOnFail: false, things:StatsString(-2)); }
-
-					SystemInfoList.Invalidate();
-					JobInfoList.Invalidate();
-					foreach (var x in StatsStrings.Values)
-					{ x.Invalidate(); }
-
-					commanded -= commanded > 0 ? 1 : 0;
 				}
+
+				if ( !firstrun && LastRuntime > MaxRunTime )
+				{
+					if( commanded == 0 )
+					{ MaxRunTime = LastRuntime; }
+
+					if( commanded != 0 && (LastRuntime > MaxTolerableRuntime || LastRuntime > MaxRunTime * 3 ) )
+					{ SaveEvent(string.Format("Command{0} took {1:0.}ms", execute && RunningJobs.Values.Any(x => x != null)?"+Jobs:("+LastRunJobs+")":"" ,MaxRunTime)); }
+					else if( LastRuntime > MaxTolerableRuntime || LastRuntime > MaxRunTime * 1.3 )
+					{ SaveEvent(string.Format("Jobs: ({0}) took {1:0.}ms", LastRunJobs, MaxRunTime)); }
+				}
+				else if ( CurrentTick > 10 )
+				{ firstrun = false; }
+
+				if (EchoState)
+				{ Echo(StatsString(-1)); }
+				if (DisplayState && CurrentTick % 10 == 0 )
+				{ WriteOut(ThisProgram.Me.GetSurface(0), l_surf: null, append: false, EchoOnFail: false, things:StatsString(-2)); }
+
+				SystemInfoList.Invalidate();
+				JobInfoList.Invalidate();
+				for(int i = -2; i < 3; ++i )
+				{ StatsStrings[i].Invalidate(); }
+				commanded -= commanded > 0 ? 1 : 0;
 			}
 
 			/// <summary>
@@ -442,7 +481,7 @@ namespace IngameScript
 					Online = !Online;
 					Echo(Online ? "starting..." : "pausing...");
 				}
-				else if (Jobs.ContainsKey(name) && Jobs[name].AllowToggle )
+				else if (JobNames.Contains(name) && Jobs[name].AllowToggle )
 				{
 					var active = state == -1 ? !Jobs[name].active : state != 0;
 					Jobs[name].active = active;
@@ -510,11 +549,25 @@ namespace IngameScript
 
 			private void TryQueueJob(string name)
 			{
-				if (Jobs.ContainsKey(name) && RunningJobs[name] == null)
+				if (JobNames.Contains(name) && RunningJobs[name] == null)
 				{
 					RunningJobs[name] = Jobs[name].Action();
 					Online = true;
 				}
+			}
+
+			private void TryRegisterEvaluation(string name)
+			{
+				if(JobNames.Contains(name))
+				{
+					Evaluating = true;
+					Online = true;
+					EvaluationDone = false;
+					EvaluatingState = -1;
+					EvaluatedJob = name;
+					StatsStrings[3].Invalidate();
+				}
+
 			}
 
 			private void ProcessRunningJobs()
@@ -656,6 +709,13 @@ namespace IngameScript
 				}
 				return true;
 			}
+
+			private bool CMD_evaluate(MyCommandLine commandLine)
+			{
+				if(CommandLine.ArgumentCount > 1)
+				{ TryRegisterEvaluation(commandLine.Argument(1)); }
+				return true;
+			}
 			#endregion commands
 
 			#region StringHelper
@@ -747,44 +807,61 @@ namespace IngameScript
 				switch (which)
 				{
 					case 0:
-						{
-							var tmp = SystemInfoList.Get();
-							res = "___ System ___";
-							for (int i = 0; i < tmp.Count; ++i)
-							{ res += "\n" + tmp[i]; }
-							break;
-						}
+					{
+						res = "___ System ___";
+						foreach (var x in SystemInfoList.Get())
+						{ res += "\n" + x; }
+						break;
+					}
 					case 1:
-						{
-							var tmp = JobInfoList.Get();
-							res = "____ Jobs ____";
-							for (int i = 0; i < tmp.Count; ++i)
-							{ res += "\n" + tmp[i]; }
-							break;
-						}
+					{
+						var tmp = JobInfoList.Get();
+						res = "____ Jobs ____";
+						foreach (var x in JobInfoList.Get())
+						{ res += "\n" + x; }
+						break;
+					}
 					case 2:
+					{
+						res = "Last Events:";
+						foreach( var x in LastEvents )
+						{ res += "\n" + x; }
+						break;
+					}
+					case 3:
+					{
+						res = "Timings:";
+						foreach( var job in JobNames)
 						{
-							res = "Last Events:";
-							foreach( var x in LastEvents )
-							{ res += "\n" + x; }
-							break;
+							res += "\n" + job;
+							if( Timings[job].Any())
+							{
+								foreach ( var y in Timings[job] )
+								{ res += " " + y.ToString(); }
+							}
+							else
+							{ res += " ?"; }
+							res += "\n";
 						}
+						break;
+					}
 					case -1:
-						{
-							res = StatsStrings[0].Get() + "\n" + StatsStrings[1].Get() + "\n" + StatsStrings[2].Get();
-							break;
-						}
+					{
+						res = StatsStrings[0].Get() + "\n" + StatsStrings[1].Get() + "\n" + StatsStrings[2].Get() + "\n" + StatsStrings[3].Get() + "\n";
+						break;
+					}
 					case -2:
-						{
-							var sys = SystemInfoList.Get();
-							var job = JobInfoList.Get();
-							res = string.Format("{0,10} {1,1}", "", Online ? "Online" : "Offline") + "\n";
-							res += string.Format("{0,-12} | {1,-1}", "   System", "    Jobs");
-							for (int i = 0; i < Math.Max(sys.Count, job.Count); ++i)
-							{ res += string.Format("\n{0,-12} | {1,-1}", i < sys.Count ? sys[i] : "", i < job.Count ? job[i] : ""); }
-							res += "\n-------------------------------\n" + StatsStrings[2].Get();
-							break;
-						}
+					{
+						var sys = SystemInfoList.Get();
+						var job = JobInfoList.Get();
+						res = string.Format("{0,10} {1,1}", "", Online ? "Online" : "Offline") + "\n";
+						res += string.Format("{0,-12} | {1,-1}", "   System", "    Jobs");
+						for (int i = 0; i < Math.Max(sys.Count, job.Count); ++i)
+						{ res += string.Format("\n{0,-12} | {1,-1}", i < sys.Count ? sys[i] : "", i < job.Count ? job[i] : ""); }
+					res += "\n-------------------------------\n" + StatsStrings[3].Get();
+					res += "\n-------------------------------\n" + StatsStrings[2].Get();
+						break;
+					}
 					default:
 						break;
 				}
