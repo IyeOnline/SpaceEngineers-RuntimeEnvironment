@@ -54,11 +54,11 @@ namespace IngameScript
 				{ UpdateFrequency.Update1, "  1"},
 				{ UpdateFrequency.Update10, " 10"},
 				{ UpdateFrequency.Update100, "100"},
-				{ UpdateFrequency.Update1 | UpdateFrequency.Once, "  1 + 1"},
-				{ UpdateFrequency.Update10 | UpdateFrequency.Once, " 10 + 1"},
-				{ UpdateFrequency.Update100 | UpdateFrequency.Once, "100 + 1"},
-				{ UpdateFrequency.Update1 | UpdateFrequency.Update10 | UpdateFrequency.Once, " 11 + 1" },
-				{ UpdateFrequency.Update1 | UpdateFrequency.Update100 | UpdateFrequency.Once, "101 + 1" }
+				{ UpdateFrequency.Update1 | UpdateFrequency.Once, "  1+1"},
+				{ UpdateFrequency.Update10 | UpdateFrequency.Once, " 10+1"},
+				{ UpdateFrequency.Update100 | UpdateFrequency.Once, "100+1"},
+				{ UpdateFrequency.Update1 | UpdateFrequency.Update10 | UpdateFrequency.Once, " 11+1" },
+				{ UpdateFrequency.Update1 | UpdateFrequency.Update100 | UpdateFrequency.Once, "101+1" }
 			};
 			#endregion const vars
 			#region control vars
@@ -79,8 +79,8 @@ namespace IngameScript
 			public double AverageRuntime { get; private set; } = 0;
 			private int commanded = 0;
 
-			private string EvaluatedJob = "";
-			private bool Evaluating = false;
+			private List<string> EvaluateJobList = new List<string>();
+			private bool EvaluationMode = false;
 			private bool EvaluationDone = true;
 			private int EvaluatingState = -1;
 			private Dictionary<string, List<double>> Timings = new Dictionary<string, List<double>>();
@@ -378,9 +378,9 @@ namespace IngameScript
 				if( (updateType & KnownCommandUpdateTypes) != 0 )
 				{ execute &= ParseArgs(args); commanded = 2; }
 
-				if ( (Online && execute ) || Evaluating )
+				if ( (Online && execute ) || EvaluationMode )
 				{
-					if (!Evaluating && CurrentTick % interval == 0)
+					if (!EvaluationMode && CurrentTick % interval == 0)
 					{
 						foreach (var job in Jobs)
 						{
@@ -394,7 +394,7 @@ namespace IngameScript
 					bool hasstates = false;
 					foreach (var name in JobNames)
 					{
-						if ( EvaluatingState > -1 || (!Jobs[name].lazy && RunningJobs[name] != null )  ) //TODO optimize this
+						if ( EvaluationMode || (!Jobs[name].lazy && RunningJobs[name] != null )  )
 						{
 							hasstates = true;
 							++FastTick;
@@ -422,25 +422,31 @@ namespace IngameScript
 				TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds * 1000 + LastRuntime;
 				ContinousTime += TimeSinceLastCall;
 
-				if (Evaluating)
+				if (EvaluationMode)
 				{
-					if (RunningJobs.Values.All(x => x == null))
+					if ( EvaluatingState < 0 && RunningJobs.Values.All(x => x == null) )
 					{
-						Timings[EvaluatedJob].Clear();
-						TryQueueJob(EvaluatedJob);
+						Echo("test");
+						Timings[EvaluateJobList[0]].Clear();
+						TryQueueJob(EvaluateJobList[0]);
 						EvaluatingState = 0;
 					}
 					else if (EvaluatingState > -1)
 					{
-						Timings[EvaluatedJob].Add(LastRuntime);
 						if (EvaluationDone)
 						{
-							Evaluating = false;
+							EvaluateJobList.RemoveAt(0);
+							EvaluationMode = EvaluateJobList.Any();
 							EvaluatingState = -1;
-							EvaluatedJob = "";
+							StatsStrings[3].Invalidate();
 							UpdateOnline();
 						}
-						EvaluationDone = RunningJobs[EvaluatedJob] == null;
+						else
+						{
+							++EvaluatingState;
+							Timings[EvaluateJobList[0]].Add(LastRuntime);
+							EvaluationDone = RunningJobs[EvaluateJobList[0]] == null;
+						}
 					}
 				}
 
@@ -560,14 +566,9 @@ namespace IngameScript
 			{
 				if(JobNames.Contains(name))
 				{
-					Evaluating = true;
-					Online = true;
-					EvaluationDone = false;
-					EvaluatingState = -1;
-					EvaluatedJob = name;
-					StatsStrings[3].Invalidate();
+					EvaluationMode = true;
+					EvaluateJobList.Add(name);
 				}
-
 			}
 
 			private void ProcessRunningJobs()
@@ -712,7 +713,12 @@ namespace IngameScript
 
 			private bool CMD_evaluate(MyCommandLine commandLine)
 			{
-				if(CommandLine.ArgumentCount > 1)
+				if( commandLine.Argument(1) == "all" )
+				{
+					foreach( var x in JobNames )
+					{ TryRegisterEvaluation(x); }
+				}
+				else
 				{ TryRegisterEvaluation(commandLine.Argument(1)); }
 				return true;
 			}
@@ -770,21 +776,22 @@ namespace IngameScript
 
 			private List<string> BuildSystemInfoList()
 			{
-				const string fmtstring = "{0,-7} {1,4:0.#}";
+				const string fmtstringLong = "{0,-7} {1,4:0.#}";
+				const string fmtstringShort = "{0,-4} {1,7:0.}";
 
 				return new List<string>()
 				{
-					string.Format(fmtstring, "Freq",
+					string.Format( fmtstringShort, "Freq",
 						FrequencyToString.Keys.Contains(ThisProgram.Runtime.UpdateFrequency) ?
 						FrequencyToString[ThisProgram.Runtime.UpdateFrequency] :
 						"???"
 					),
-					string.Format( "{0,-4} {1,7:0.}", "Tick", CurrentTick),
-					string.Format(fmtstring, "fast", FastTick.ToString() + "/" + FastTickMax.ToString() ),
-					string.Format(fmtstring, "Elapsed", (int)TimeSinceLastCall),
-					string.Format(fmtstring, " max RT", MaxRunTime),
-					string.Format(fmtstring, " avg RT", AverageRuntime),
-					string.Format(fmtstring, "last RT", LastRuntime)
+					string.Format( fmtstringShort, "Tick", CurrentTick),
+					string.Format( fmtstringLong, "fast", FastTick.ToString() + "/" + FastTickMax.ToString() ),
+					string.Format( fmtstringLong, "Elapsed", (int)TimeSinceLastCall),
+					string.Format( fmtstringLong, " max RT", MaxRunTime),
+					string.Format( fmtstringLong, " avg RT", AverageRuntime),
+					string.Format( fmtstringLong, "last RT", LastRuntime)
 				};
 			}
 
@@ -837,7 +844,8 @@ namespace IngameScript
 							if( Timings[job].Any())
 							{
 								foreach ( var y in Timings[job] )
-								{ res += " " + y.ToString(); }
+								{ res += string.Format(" {0:.00}",y); }
+								res += string.Format(" => avg:{0:.00}, tot:{1:.00}", Timings[job].Average(), Timings[job].Sum());
 							}
 							else
 							{ res += " ?"; }
@@ -858,8 +866,8 @@ namespace IngameScript
 						res += string.Format("{0,-12} | {1,-1}", "   System", "    Jobs");
 						for (int i = 0; i < Math.Max(sys.Count, job.Count); ++i)
 						{ res += string.Format("\n{0,-12} | {1,-1}", i < sys.Count ? sys[i] : "", i < job.Count ? job[i] : ""); }
-					res += "\n-------------------------------\n" + StatsStrings[3].Get();
 					res += "\n-------------------------------\n" + StatsStrings[2].Get();
+					res += "\n-------------------------------\n" + StatsStrings[3].Get();
 						break;
 					}
 					default:
