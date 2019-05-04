@@ -76,7 +76,9 @@ namespace IngameScript
 			public double TimeSinceLastCall { get; private set; } = 0;
 			public double LastRuntime { get; private set; } = 0;
 			public double MaxRunTime { get; private set; } = 0;
-			public double AverageRuntime { get; private set; } = 0;
+			private RunningAverage _AverageRuntime = new RunningAverage();
+			public double RunningAverge { get { return _AverageRuntime.Value; } }
+
 			private int commanded = 0;
 
 			private List<string> EvaluateJobList = new List<string>();
@@ -84,6 +86,7 @@ namespace IngameScript
 			private bool EvaluationDone = true;
 			private int EvaluatingState = -1;
 			private Dictionary<string, List<double>> Timings = new Dictionary<string, List<double>>();
+			private Dictionary<string, JobRuntimeInfo> Timings2 = new Dictionary<string, JobRuntimeInfo>();
 
 			private CachedObject<List<string>> SystemInfoList;
 			private CachedObject<List<string>> JobInfoList;
@@ -110,6 +113,48 @@ namespace IngameScript
 			#endregion vars
 
 			#region classes
+			private class RunningAverage
+			{
+				public double Value { get; private set; } = 0;
+				public int N { get; private set; } = 0;
+
+				public RunningAverage()
+				{ }
+				public RunningAverage( double init )
+				{ N = 1; Value = init; }
+				public RunningAverage( List<double> l )
+				{ N = l.Count; Value = l.Average(); }
+
+				public void AddValue( double value )
+				{ Value = ( value + N * Value ) / ++N; }
+
+				public void Reset()
+				{ Value = 0; N = 0; }
+			}
+
+			private class JobRuntimeInfo
+			{
+				public List<RunningAverage> StateInfo { get; private set; } = new List<RunningAverage>();
+				public RunningAverage Average { get; private set; } = new RunningAverage();
+				public RunningAverage Sum { get; private set; } = new RunningAverage();
+				public bool Any { get; private set; }
+
+				public void AddParse( int stage, double time )
+				{
+					Any = true;
+					if( stage >= StateInfo.Count )
+					{ StateInfo.Add( new RunningAverage(time) ); }
+					else
+					{ StateInfo[stage].AddValue(time); }
+				}
+
+				public void Update()
+				{
+					Average.AddValue(StateInfo.Average( x => x.Value ));
+					Sum.AddValue(StateInfo.Sum(x => x.Value));
+				}
+			}
+
 			private class CachedObject<T>
 			{
 				public bool Good { get; private set; }
@@ -245,6 +290,7 @@ namespace IngameScript
                     { Output(things: " OK"); }
 
 					Timings.Add(job.Key, new List<double>());
+					Timings2.Add(job.Key, new JobRuntimeInfo());
 
 					job.Value.RequeueInterval = SanitizeInterval(job.Value.RequeueInterval);
 					AllowFrequencyChange |= job.Value.AllowFrequencyChange;
@@ -418,8 +464,9 @@ namespace IngameScript
 				CurrentTick += FastTick > 0 ? 1 : CurrentTickrate;
 				++SymbolTick;
 				LastRuntime = ThisProgram.Runtime.LastRunTimeMs;
-				if ( commanded == 0)
-				{ AverageRuntime = (LastRuntime + (SymbolTick - 1) * AverageRuntime) / SymbolTick; }
+				if (commanded == 0)
+				//{ AverageRuntime = (LastRuntime + (SymbolTick - 1) * AverageRuntime) / SymbolTick; }
+				{ _AverageRuntime.AddValue( LastRuntime ); }
 				TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds * 1000 + LastRuntime;
 				ContinousTime += TimeSinceLastCall;
 
@@ -436,6 +483,7 @@ namespace IngameScript
 					{
 						if (EvaluationDone)
 						{
+							Timings2[EvaluateJobList[0]].Update();
 							EvaluateJobList.RemoveAt(0);
 							EvaluationMode = EvaluateJobList.Any();
 							EvaluatingState = -1;
@@ -444,8 +492,9 @@ namespace IngameScript
 						}
 						else
 						{
-							++EvaluatingState;
 							Timings[EvaluateJobList[0]].Add(LastRuntime);
+							Timings2[EvaluateJobList[0]].AddParse(EvaluatingState, LastRuntime);
+							++EvaluatingState;
 							EvaluationDone = RunningJobs[EvaluateJobList[0]] == null;
 						}
 					}
@@ -473,6 +522,7 @@ namespace IngameScript
 				JobInfoList.Invalidate();
 				for(int i = -3; i < 3; ++i )
 				{ StatsStrings[i].Invalidate(); }
+
 				commanded -= commanded > 0 ? 1 : 0;
 			}
 
@@ -791,7 +841,7 @@ namespace IngameScript
 					string.Format( fmtstringLong, "fast", FastTick.ToString() + "/" + FastTickMax.ToString() ),
 					string.Format( fmtstringLong, "Elapsed", (int)TimeSinceLastCall),
 					string.Format( fmtstringLong, " max RT", MaxRunTime),
-					string.Format( fmtstringLong, " avg RT", AverageRuntime),
+					string.Format( fmtstringLong, " avg RT", _AverageRuntime.Value ),
 					string.Format( fmtstringLong, "last RT", LastRuntime)
 				};
 			}
@@ -838,21 +888,23 @@ namespace IngameScript
 					}
 					case 3:
 					{
-						const string fmtstring = "\n{0,-6} {1,-15} {2,3:0.0} {3,3:0.0}";
-						res = "Timings [ms]:" + string.Format(fmtstring, "job", "stages", "avg", "tot");
+						const string fmtstringJob = "\n{0,-6} | {1,1}";
+						const string fmtstringTime = " | {0,3:0.0} | {1,3:0.0} | {2,-13}";
+						res = "Timings [ms]:" + string.Format(fmtstringJob + " | {2,3} | {3,3} | {4,-13} ", "job", "N", "avg", "tot", "stages" );
 
 						foreach ( var job in JobNames)
 						{
-							string tmp = "";
-							if( Timings[job].Any())
+							res += string.Format(fmtstringJob, job.Substring(0, Math.Min(job.Length, 6)), Timings2[job].Sum.N);
+
+							if (Timings2[job].Any)
 							{
-								foreach( var t in Timings[job] )
-								{ tmp += string.Format("{0:0.0}",t); }
+								string tmp = "";
+								foreach (var t in Timings2[job].StateInfo )
+								{ tmp += string.Format("{0:0.0} ", t.Value); }
+								res += string.Format(fmtstringTime, Timings2[job].Average.Value, Timings2[job].Sum.Value, tmp );
 							}
 							else
-							{ tmp = "?"; }
-
-							res += string.Format(fmtstring, job.Substring(0, Math.Min(job.Length, 6)), tmp, Timings[job].Any()?Timings[job].Average():0, Timings[job].Any()?Timings[job].Sum():0 );
+							{ res += string.Format(fmtstringTime, " ? ", " ? ", " ? "); }
 						}
 						break;
 					}
