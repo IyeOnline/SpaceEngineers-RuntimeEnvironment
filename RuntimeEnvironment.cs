@@ -119,13 +119,16 @@ namespace IngameScript
 
 				public RunningAverage()
 				{ }
-				public RunningAverage( double init )
-				{ N = 1; Value = init; }
+				public RunningAverage( double _Value, int _N = 1 )
+				{ N = _N; Value = _Value; }
 				public RunningAverage( List<double> l )
 				{ N = l.Count; Value = l.Average(); }
 
 				public void AddValue( double value )
 				{ Value = ( value + N * Value ) / ++N; }
+
+				public void Set( double _Value, int _N = 1 )
+				{ N = _N; Value = _Value; }
 
 				public void Reset()
 				{ Value = 0; N = 0; }
@@ -149,8 +152,8 @@ namespace IngameScript
 
 				public void Update()
 				{
-					Average.AddValue(StateInfo.Average( x => x.Value ));
-					Sum.AddValue(StateInfo.Sum(x => x.Value));
+					Average.Set(StateInfo.Average( x => x.Value ),StateInfo[0].N);
+					Sum.Set(StateInfo.Sum(x => x.Value), StateInfo[0].N);
 				}
 			}
 
@@ -886,7 +889,7 @@ namespace IngameScript
 					{
 						const string fmtstringJob = "\n{0,-6} | {1,1}";
 						const string fmtstringTime = " | {0,3:0.0} | {1,3:0.0} | {2,-13}";
-						res = "Timings [ms]:" + string.Format(fmtstringJob + " | {2,3} | {3,3} | {4,-13} ", "job", "N", "avg", "tot", "stages" );
+						res = "Runtimes [ms]:" + string.Format(fmtstringJob + " | {2,3} | {3,3} | {4,-13} ", "job", "N", "avg", "tot", "stages" );
 
 						foreach ( var job in JobNames)
 						{
