@@ -85,7 +85,6 @@ namespace IngameScript
 			private bool EvaluationMode = false;
 			private bool EvaluationDone = true;
 			private int EvaluatingState = -1;
-			private Dictionary<string, List<double>> Timings = new Dictionary<string, List<double>>();
 			private Dictionary<string, JobRuntimeInfo> Timings2 = new Dictionary<string, JobRuntimeInfo>();
 
 			private CachedObject<List<string>> SystemInfoList;
@@ -157,12 +156,12 @@ namespace IngameScript
 
 			private class CachedObject<T>
 			{
-				public bool Good { get; private set; }
+				public bool Good { get; private set; } = false;
 				private readonly Func<T> Setter;
 				private T Data;
 
 				public CachedObject(Func<T> _Setter)
-				{ Good = true; Setter = _Setter; Data = Setter(); }
+				{ Setter = _Setter; }
 
 				public T Get()
 				{ if (!Good) Data = Setter(); Good = true; return Data; }
@@ -289,7 +288,6 @@ namespace IngameScript
                     else
                     { Output(things: " OK"); }
 
-					Timings.Add(job.Key, new List<double>());
 					Timings2.Add(job.Key, new JobRuntimeInfo());
 
 					job.Value.RequeueInterval = SanitizeInterval(job.Value.RequeueInterval);
@@ -474,7 +472,6 @@ namespace IngameScript
 				{
 					if ( EvaluatingState < 0 && RunningJobs.Values.All(x => x == null) )
 					{
-						Timings[EvaluateJobList[0]].Clear();
 						TryQueueJob(EvaluateJobList[0]);
 						EvaluatingState = 0;
 						EvaluationDone = false;
@@ -492,7 +489,6 @@ namespace IngameScript
 						}
 						else
 						{
-							Timings[EvaluateJobList[0]].Add(LastRuntime);
 							Timings2[EvaluateJobList[0]].AddParse(EvaluatingState, LastRuntime);
 							++EvaluatingState;
 							EvaluationDone = RunningJobs[EvaluateJobList[0]] == null;
