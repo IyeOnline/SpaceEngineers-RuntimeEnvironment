@@ -296,6 +296,7 @@ namespace IngameScript
 				StatsStrings[3] = new CachedObject<string>(() => BuildStatsString(3));
 				StatsStrings[-1] = new CachedObject<string>(() => BuildStatsString(-1));
 				StatsStrings[-2] = new CachedObject<string>(() => BuildStatsString(-2));
+				StatsStrings[-3] = new CachedObject<string>(() => BuildStatsString(-3));
                 Output(EndLine: true, things: "Done!");
 
                 if (DisplayState)
@@ -470,7 +471,7 @@ namespace IngameScript
 
 				SystemInfoList.Invalidate();
 				JobInfoList.Invalidate();
-				for(int i = -2; i < 3; ++i )
+				for(int i = -3; i < 3; ++i )
 				{ StatsStrings[i].Invalidate(); }
 				commanded -= commanded > 0 ? 1 : 0;
 			}
@@ -837,19 +838,21 @@ namespace IngameScript
 					}
 					case 3:
 					{
-						res = "Timings:";
-						foreach( var job in JobNames)
+						const string fmtstring = "\n{0,-6} {1,-15} {2,3:0.0} {3,3:0.0}";
+						res = "Timings [ms]:" + string.Format(fmtstring, "job", "stages", "avg", "tot");
+
+						foreach ( var job in JobNames)
 						{
-							res += "\n" + job;
+							string tmp = "";
 							if( Timings[job].Any())
 							{
-								foreach ( var y in Timings[job] )
-								{ res += string.Format(" {0:.00}",y); }
-								res += string.Format(" => avg:{0:.00}, tot:{1:.00}", Timings[job].Average(), Timings[job].Sum());
+								foreach( var t in Timings[job] )
+								{ tmp += string.Format("{0:0.0}",t); }
 							}
 							else
-							{ res += " ?"; }
-							res += "\n";
+							{ tmp = "?"; }
+
+							res += string.Format(fmtstring, job.Substring(0, Math.Min(job.Length, 6)), tmp, Timings[job].Any()?Timings[job].Average():0, Timings[job].Any()?Timings[job].Sum():0 );
 						}
 						break;
 					}
@@ -866,8 +869,12 @@ namespace IngameScript
 						res += string.Format("{0,-12} | {1,-1}", "   System", "    Jobs");
 						for (int i = 0; i < Math.Max(sys.Count, job.Count); ++i)
 						{ res += string.Format("\n{0,-12} | {1,-1}", i < sys.Count ? sys[i] : "", i < job.Count ? job[i] : ""); }
-					res += "\n-------------------------------\n" + StatsStrings[2].Get();
-					res += "\n-------------------------------\n" + StatsStrings[3].Get();
+						res += "\n-------------------------------\n" + StatsStrings[2].Get();
+						break;
+					}
+					case -3:
+					{
+						res = StatsStrings[-2].Get() + "\n-------------------------------\n" + StatsStrings[3].Get();
 						break;
 					}
 					default:
