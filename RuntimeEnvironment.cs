@@ -426,10 +426,10 @@ namespace IngameScript
 				{
 					if ( EvaluatingState < 0 && RunningJobs.Values.All(x => x == null) )
 					{
-						Echo("test");
 						Timings[EvaluateJobList[0]].Clear();
 						TryQueueJob(EvaluateJobList[0]);
 						EvaluatingState = 0;
+						EvaluationDone = false;
 					}
 					else if (EvaluatingState > -1)
 					{
