@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <MSBuildAllProjects>$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <HasSharedItems>true</HasSharedItems>
+    <SharedGUID>ebe053e6-708d-42a5-ad3c-fe6301e70e42</SharedGUID>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration">
+    <Import_RootNamespace>SpaceEngineers_RuntimeEnvironment</Import_RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)CachedObject.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)RuntimeEnvironment.Command.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)RuntimeEnvironment.Job.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)RuntimeEnvironment.JobRuntimeInfo.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)RunningAverage.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)RuntimeEnvironment.cs" />
+  </ItemGroup>
+</Project>

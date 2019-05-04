@@ -1,0 +1,12 @@
+
+*.*
+Example/*
+
+!.gitignore
+!Example/Program.cs
+!*.cs
+!SpaceEngineers-RuntimeEnvironment.projitems
+!SpaceEngineers-RuntimeEnvironment.shproj
+!Readme.md
+!docs/docs.xml
+

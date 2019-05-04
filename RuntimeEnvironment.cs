@@ -27,7 +27,7 @@ namespace IngameScript
 		/// <seealso cref="Job"/>
         /// <seealso cref="Command"/>
 		/// <seealso cref="Tick(string, UpdateType, bool)"/>
-		public class RuntimeEnvironment
+		public partial class RuntimeEnvironment
 		{
 			#region vars
 			#region const static vars
@@ -108,138 +108,9 @@ namespace IngameScript
 			private readonly UpdateType KnownCommandUpdateTypes;
 
 			public MyGridProgram ThisProgram { get; }
+
 			#endregion const vars
 			#endregion vars
-
-			#region classes
-			private class RunningAverage
-			{
-				public double Value { get; private set; } = 0;
-				public int N { get; private set; } = 0;
-
-				public RunningAverage()
-				{ }
-				public RunningAverage( double _Value, int _N = 1 )
-				{ N = _N; Value = _Value; }
-				public RunningAverage( List<double> l )
-				{ N = l.Count; Value = l.Average(); }
-
-				public void AddValue( double value )
-				{ Value = ( value + N * Value ) / ++N; }
-
-				public void Set( double _Value, int _N = 1 )
-				{ N = _N; Value = _Value; }
-
-				public void Reset()
-				{ Value = 0; N = 0; }
-			}
-
-			private class JobRuntimeInfo
-			{
-				public List<RunningAverage> StateInfo { get; private set; } = new List<RunningAverage>();
-				public RunningAverage Average { get; private set; } = new RunningAverage();
-				public RunningAverage Sum { get; private set; } = new RunningAverage();
-				public bool Any { get; private set; }
-
-				public void AddParse( int stage, double time )
-				{
-					Any = true;
-					if( stage >= StateInfo.Count )
-					{ StateInfo.Add( new RunningAverage(time) ); }
-					else
-					{ StateInfo[stage].AddValue(time); }
-				}
-
-				public void Update()
-				{
-					Average.Set(StateInfo.Average( x => x.Value ),StateInfo[0].N);
-					Sum.Set(StateInfo.Sum(x => x.Value), StateInfo[0].N);
-				}
-			}
-
-			private class CachedObject<T>
-			{
-				public bool Good { get; private set; } = false;
-				private readonly Func<T> Setter;
-				private T Data;
-
-				public CachedObject(Func<T> _Setter)
-				{ Setter = _Setter; }
-
-				public T Get()
-				{ if (!Good) Data = Setter(); Good = true; return Data; }
-
-				public void Invalidate()
-				{ Good = false; }
-			}
-
-			/// <summary>
-			/// The data structure for a job
-			/// </summary>
-			/// <see cref="Job.Job(Func{IEnumerator{bool}}, int, bool, bool, bool, bool)"/>
-			/// <seealso cref="Tick(string, UpdateType, bool)"/>
-			public class Job
-			{
-				public readonly Func<IEnumerator<bool>> Action;
-				public int RequeueInterval;
-				public bool active;
-				public readonly bool lazy;
-				public readonly bool AllowToggle;
-				public readonly bool AllowFrequencyChange;
-
-				/// <summary>Construts a job object</summary>
-				/// <param name="_Action">
-				/// a statemachine
-				/// <para>use <c>yield return true;</c> everytime you want it to wait for the next tick</para>
-				/// </param>
-				/// <param name="_RequeueInterval">
-				/// interval between how often the job will be requeued. Note this is server ticks, not PB executes
-				/// <para>NOTE: if this is smaller than the number of states the <paramref name="_Action"/> has, it will only be queued once the next interval is hit.</para>
-				/// <para>Will be sanatized to a reasonable multiple of possible PB update Frequencies N*(1,10,100)</para>
-				/// </param>
-				/// <param name="_active">whether the job should be active from the start</param>
-				/// <param name="_lazy">if true, your job will not switch the environment into fast tick mode, but instead space your job out</param>
-				/// <param name="_AllowToggle">whether the user should be allowed to use the command "toggle" to turn this job on or off.</param>
-				/// <param name="_AllowFrequencyChange">whether the user should be allowed to use the command "frequency" to change the requeue interval of this job.</param>
-				/// <seealso cref="Tick(string, UpdateType, bool)"/>
-				public Job( Func<IEnumerator<bool>> _Action, int _RequeueInterval, bool _active = true, bool _lazy = true, bool _AllowToggle = true, bool _AllowFrequencyChange = true )
-				{
-					Action = _Action;
-					RequeueInterval = _RequeueInterval;
-					active = _active;
-					lazy = _lazy;
-					AllowToggle = _AllowToggle;
-					AllowFrequencyChange = _AllowFrequencyChange;	
-				}
-			}
-
-			/// <summary>
-			/// The data structure for a Command
-			/// </summary>
-			/// <see cref="Command.Command(Func{MyCommandLine, bool}, int, UpdateType)"/>
-			/// <seealso cref="Tick(string, UpdateType, bool)"/>
-			public class Command
-			{
-				public readonly Func<MyCommandLine, bool> Action;
-				public readonly int MinumumArguments;
-				public readonly UpdateType UpdateType;
-
-				/// <summary>
-				/// Constructs a job object
-				/// <para>Will get handed a MyCommandLine argument, which has parsed the argument <c>RuntimeEnvironment.Tick(..)</c> got. Note that the first argument will be the command itself</para>
-				/// </summary>
-				/// <param name="_Action">The function to be called when the command is encoutnered. Gets a already populated <c>MyCommandLine</c>, which contains the arguments Tick() got</param>
-				/// <param name="_MinumumArguments">minumum of ADDITIONAL arguments this command needs. Note: not sanitzed for whitespace or empty additional commands</param>
-				/// <param name="_UpdateType">update type the command will be run on. defaults to manually clicking the "run" button</param>
-				/// <seealso cref="Tick(string, UpdateType, bool)"/>
-				public Command( Func<MyCommandLine, bool> _Action, int _MinumumArguments = 0, UpdateType _UpdateType = UpdateType.Terminal )
-				{
-					Action = _Action;
-					MinumumArguments = _MinumumArguments;
-					UpdateType = _UpdateType;
-				}
-			}
-			#endregion classes
 
 			#region public functions
 			/// <summary>
@@ -466,7 +337,6 @@ namespace IngameScript
 				++SymbolTick;
 				LastRuntime = ThisProgram.Runtime.LastRunTimeMs;
 				if (commanded == 0)
-				//{ AverageRuntime = (LastRuntime + (SymbolTick - 1) * AverageRuntime) / SymbolTick; }
 				{ _AverageRuntime.AddValue( LastRuntime ); }
 				TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds * 1000 + LastRuntime;
 				ContinousTime += TimeSinceLastCall;
@@ -699,7 +569,7 @@ namespace IngameScript
 			}
 			#endregion private functions
 
-			#region commands
+			#region command functions
 			private bool CMD_toggle(MyCommandLine commandLine)
 			{
 				if( commandLine.ArgumentCount == 1 )
@@ -772,7 +642,7 @@ namespace IngameScript
 				{ TryRegisterEvaluation(commandLine.Argument(1)); }
 				return true;
 			}
-			#endregion commands
+			#endregion command functions
 
 			#region StringHelper
 			/// <summary>
