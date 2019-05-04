@@ -29,8 +29,8 @@ All in all, it should help you reduce the performance impact of your script.
 2. Setup your VS project. Refer to [Malware's guide](https://github.com/malware-dev/MDK-SE/wiki/Getting-Started)
 
 3. Add the Runtime Environment to your project. There is two ways to do that:
-    * As a subroject. Make sure to not accidentally include the Example as a source. That would be bad. You can just ignore it in VS.
-    * By simply adding the source file to your project
+    * As a shared project. The VS files for the shared project are included in the repo. Again, Malware has a [guide](https://github.com/malware-dev/MDK-SE/wiki/Mixin-Projects) on this. <br> Just note that you want to add an existing item instead of a new shared project. Select the `SpaceEngineers-RuntimeEnvironment.shproj` file.
+    * By simply adding the all the source files to your project
 
 4. Use it in your `Program.cs`. Take a look at the [example program](https://github.com/IyeOnline/SpaceEngineers-RuntimeEnvironment/blob/master/Example/Program.cs) for a quick overview, or check out the [wiki](https://github.com/IyeOnline/SpaceEngineers-RuntimeEnvironment/wiki) for more in depth expalnations.
 
