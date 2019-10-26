@@ -38,7 +38,6 @@ namespace IngameScript
 			public const string SaveStringEnd = "VNETR";
 			public const char SaveJobSeparator = '\u2194';
 			public const char SaveInfoSeparator = ' ';
-			const int RTLinesMax = 10000;
 			private readonly List<string> ForbiddenJobNames = new List<string>() { "all" }; //strings that are used for some internal commands in the place of jobnames
 			private readonly List<string> ForbiddenCommands = new List<string>() { "toggle", "run", "frequency", "evaluate", "reset" }; //commands that are already provided by the environment
 
@@ -64,7 +63,7 @@ namespace IngameScript
 			#endregion const vars
 			#region readonly vars
 			private readonly Dictionary<string, Job> Jobs;
-			private Dictionary<string, IEnumerator<bool>> RunningJobs = new Dictionary<string, IEnumerator<bool>>();
+			private readonly Dictionary<string, IEnumerator<bool>> RunningJobs = new Dictionary<string, IEnumerator<bool>>();
 			private readonly List<string> JobNames;
 			private readonly bool AllowToggle = true;
 			private readonly bool AllowFrequencyChange = true;
@@ -90,26 +89,24 @@ namespace IngameScript
 			private int FastTickMax = 0; //max number of consequtive fast ticks
 			private bool firstrun = true;
             private string LastRunJobs = "";
-			private bool StoreRT = false;
-			private int RTLines = 0;
 
 			public double ContinousTime { get; private set; } = 0;
 			public double TimeSinceLastCall { get; private set; } = 0;
 			public double LastRuntime { get; private set; } = 0;
 			public double MaxRunTime { get; private set; } = 0;
-			private RunningAverage _AverageRuntime = new RunningAverage();
+			private readonly RunningAverage _AverageRuntime = new RunningAverage();
 
 			private int commanded = 0;
 
-			private List<string> EvaluateJobList = new List<string>();
+			private readonly List<string> EvaluateJobList = new List<string>();
 			private bool EvaluationMode = false;
 			private bool EvaluationDone = true;
 			private int EvaluatingState = -1;
-			private Dictionary<string, JobRuntimeInfo> AverageJobRuntimes = new Dictionary<string, JobRuntimeInfo>();
+			private readonly Dictionary<string, JobRuntimeInfo> AverageJobRuntimes = new Dictionary<string, JobRuntimeInfo>();
 
-			private CachedObject<List<string>> SystemInfoList;
-			private CachedObject<List<string>> JobInfoList;
-			private Dictionary<int, CachedObject<string>> StatsStrings = new Dictionary<int, CachedObject<string>>();
+			private readonly CachedObject<List<string>> SystemInfoList;
+			private readonly CachedObject<List<string>> JobInfoList;
+			private readonly Dictionary<int, CachedObject<string>> StatsStrings = new Dictionary<int, CachedObject<string>>();
 
 			public List<string> LastEvents { get; private set; } = new List<string>();
 			#endregion control vars
@@ -362,13 +359,6 @@ namespace IngameScript
 				TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds * 1000 + LastRuntime;
 				ContinousTime += TimeSinceLastCall;
 
-				if ( StoreRT )
-				{
-					WriteOut(ThisProgram.Me.GetSurface(1), null, RTLines++ < RTLinesMax, false, true, LastRuntime.ToString());
-					if (RTLines == RTLinesMax)
-					{ RTLines = 0; }
-				}
-
 				if (EvaluationMode)
 				{
 					if ( EvaluatingState < 0 && RunningJobs.Values.All(x => x == null) )
@@ -414,8 +404,8 @@ namespace IngameScript
 				{ Echo(StatsString(-1)); }
 				if (DisplayState && CurrentTick % 10 == 0 )
 				{
-					WriteOut(PBscreen, l_surf: null, append: false, EchoOnFail: false, things:StatsString(-2));
-					WriteOut(PBkeyboard, things: TickString() + "\n" + TickString() + "\n" + TickString());
+					PBscreen.WriteText(StatsStrings[-2].Value, false);
+					PBkeyboard.WriteText(TickString() + "\n" + TickString() + "\n" + TickString(), false);
 				}
 
 				SystemInfoList.Invalidate();
@@ -596,11 +586,11 @@ namespace IngameScript
 
             private void Output( bool EndLine = true, params object[] things)
 			{
-				var text = ListToString(things);
+				string text = ListToString(things:things) + (EndLine ? "\n" : "");
 				if (EchoState)
 				{ Echo(text); }
 				if (DisplayState)
-				{ WriteOut(ThisProgram.Me.GetSurface(0), l_surf: null, append: true, EchoOnFail: false, EndLine: EndLine, things: text); }
+				{ PBscreen.WriteText(text, true); }
 			}
 			#endregion private functions
 
@@ -711,13 +701,12 @@ namespace IngameScript
 				return new string('-', i) + "|" + new string('-', 11 - i);
 			}
 
-			static public string ListToString(params object[] things)
+			static private string ListToString(string separator = " ", params object[] things)
 			{
 				if (things.Length == 1 && things[0] is string)
 				{ return things[0] as string; }
 				else
 				{
-					const string separator = " ";
 					string s = "";
 					foreach (var p in things)
 					{
@@ -859,33 +848,7 @@ namespace IngameScript
 			/// </summary>
 			/// <param name="things">params object array of what you want to echo. objects should have a ToString() method</param>
 			public void Echo(params object[] things)
-			{ ThisProgram.Echo( ListToString(things) ); }
-
-			/// <summary>
-			/// Writes the object array to the given surfaces. All other arguments are optional
-			/// </summary>
-			/// <param name="surf">a single surface to write to</param>
-			/// <param name="l_surf">a list of surfaces to write to</param>
-			/// <param name="append">whether to append to the text already on that surface</param>
-			/// <param name="EchoOnFail">whether to Echo if writing to the displays false</param>
-			/// <param name="things">the <c>params object[]</c> of stuff to write</param>
-			public void WriteOut(IMyTextSurface surf = null, List<IMyTextSurface> l_surf = null, bool append = false, bool EchoOnFail = false, bool EndLine = true, params object[] things )
-			{
-				var badgroup = l_surf == null || !l_surf.Any();
-				string text = ListToString(things) + (EndLine ? "\n" : "");
-				foreach (var thing in things)
-				{
-					if (surf != null)
-					{ surf.WriteText(text, append); }
-					if (!badgroup)
-					{
-						foreach (var s in l_surf)
-						{ if( s != null ) s.WriteText(text, append); }
-					}
-					if (EchoOnFail && surf == null && badgroup)
-					{ ThisProgram.Echo(text); }
-				}
-			}
+			{ ThisProgram.Echo( ListToString(things:things) ); }
 
 			/// <summary>
 			/// Gets all block of a <typeparamref name="Tfind"/> fulfilling <paramref name="conditional"/>. Then constructs a <typeparamref name="Treturn"/> using the static constructor <paramref name="Constructor"/> and returns a list of the results;
