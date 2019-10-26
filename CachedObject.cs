@@ -24,13 +24,16 @@ namespace IngameScript
 		{
 			public bool Good { get; private set; } = false;
 			private readonly Func<T> Setter;
-			private T Data;
+			private T data;
 
 			public CachedObject(Func<T> _Setter)
 			{ Setter = _Setter; }
 
-			public T Get()
-			{ if (!Good) Data = Setter(); Good = true; return Data; }
+			public T Value
+			{
+				get
+				{ if (!Good) data = Setter(); Good = true; return data; }
+			}
 
 			public void Invalidate()
 			{ Good = false; }

@@ -40,5 +40,5 @@ You just need to copy and paste the right parts of source code into the right pl
 )
 
 # Feature requests & bug reports
-If you have a good idea what this lib could need, or just had throw an exception in your face, open up an [issue](https://github.com/IyeOnline/SpaceEngineers-RuntimeEnvironment/issues).
+If you have a good idea what this lib could need, or just had an exception thrown in your face, open up an [issue](https://github.com/IyeOnline/SpaceEngineers-RuntimeEnvironment/issues).
 Please provide a minimal "working" example of your problem, or a pseudocode draft of your suggestion.

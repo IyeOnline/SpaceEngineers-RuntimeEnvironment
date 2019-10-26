@@ -30,7 +30,7 @@ namespace IngameScript
 		public partial class RuntimeEnvironment
 		{
 			#region vars
-			#region const static vars
+			#region const vars
 			const int maxinterval = int.MaxValue - 1;
 			const int MaxStoredEvents = 3;
 			const double MaxTolerableRuntime = 10;
@@ -38,8 +38,9 @@ namespace IngameScript
 			public const string SaveStringEnd = "VNETR";
 			public const char SaveJobSeparator = '\u2194';
 			public const char SaveInfoSeparator = ' ';
+			const int RTLinesMax = 10000;
 			private readonly List<string> ForbiddenJobNames = new List<string>() { "all" }; //strings that are used for some internal commands in the place of jobnames
-			private readonly List<string> ForbiddenCommands = new List<string>() { "toggle", "run", "frequency", "evaluate" }; //commands that are already provided by the environment
+			private readonly List<string> ForbiddenCommands = new List<string>() { "toggle", "run", "frequency", "evaluate", "reset" }; //commands that are already provided by the environment
 
 			private readonly Dictionary<int, UpdateFrequency> intervalToFrequency = new Dictionary<int, UpdateFrequency>()
 			{
@@ -61,6 +62,24 @@ namespace IngameScript
 				{ UpdateFrequency.Update1 | UpdateFrequency.Update100 | UpdateFrequency.Once, "101+1" }
 			};
 			#endregion const vars
+			#region readonly vars
+			private readonly Dictionary<string, Job> Jobs;
+			private Dictionary<string, IEnumerator<bool>> RunningJobs = new Dictionary<string, IEnumerator<bool>>();
+			private readonly List<string> JobNames;
+			private readonly bool AllowToggle = true;
+			private readonly bool AllowFrequencyChange = true;
+			private readonly bool EchoState;
+			private readonly bool DisplayState;
+			private readonly IMyTextSurface PBscreen;
+			private readonly IMyTextSurface PBkeyboard;
+
+			private readonly MyCommandLine CommandLine = new MyCommandLine();
+
+			private readonly Dictionary<string, Command> Commands;
+			private readonly UpdateType KnownCommandUpdateTypes;
+
+			public MyGridProgram ThisProgram { get; }
+			#endregion readonly vars
 			#region control vars
 			public bool Online { get; private set; } = false; //whether the environment is currently online
 			private int CurrentTick = 0; //the current (continous) tick
@@ -71,13 +90,14 @@ namespace IngameScript
 			private int FastTickMax = 0; //max number of consequtive fast ticks
 			private bool firstrun = true;
             private string LastRunJobs = "";
+			private bool StoreRT = false;
+			private int RTLines = 0;
 
 			public double ContinousTime { get; private set; } = 0;
 			public double TimeSinceLastCall { get; private set; } = 0;
 			public double LastRuntime { get; private set; } = 0;
 			public double MaxRunTime { get; private set; } = 0;
 			private RunningAverage _AverageRuntime = new RunningAverage();
-			public double RunningAverge { get { return _AverageRuntime.Value; } }
 
 			private int commanded = 0;
 
@@ -85,7 +105,7 @@ namespace IngameScript
 			private bool EvaluationMode = false;
 			private bool EvaluationDone = true;
 			private int EvaluatingState = -1;
-			private Dictionary<string, JobRuntimeInfo> Timings2 = new Dictionary<string, JobRuntimeInfo>();
+			private Dictionary<string, JobRuntimeInfo> AverageJobRuntimes = new Dictionary<string, JobRuntimeInfo>();
 
 			private CachedObject<List<string>> SystemInfoList;
 			private CachedObject<List<string>> JobInfoList;
@@ -93,23 +113,9 @@ namespace IngameScript
 
 			public List<string> LastEvents { get; private set; } = new List<string>();
 			#endregion control vars
-			#region const vars
-			private readonly Dictionary<string, Job> Jobs;
-			private Dictionary<string, IEnumerator<bool>> RunningJobs = new Dictionary<string, IEnumerator<bool>>();
-			private readonly List<string> JobNames;
-			private readonly bool AllowToggle = true;
-			private readonly bool AllowFrequencyChange = true;
-			private readonly bool EchoState;
-			private readonly bool DisplayState;
+			
 
-			private readonly MyCommandLine CommandLine = new MyCommandLine();
-
-			private readonly Dictionary<string, Command> Commands;
-			private readonly UpdateType KnownCommandUpdateTypes;
-
-			public MyGridProgram ThisProgram { get; }
-
-			#endregion const vars
+			
 			#endregion vars
 
 			#region public functions
@@ -135,8 +141,15 @@ namespace IngameScript
 				DisplayState = _DisplayState;
 				if (DisplayState)
 				{
-					ThisProgram.Me.GetSurface(0).ContentType = ContentType.TEXT_AND_IMAGE;
-					ThisProgram.Me.GetSurface(0).WriteText("", false);
+					PBscreen = ThisProgram.Me.GetSurface(0);
+					PBscreen.ContentType = ContentType.TEXT_AND_IMAGE;
+					PBscreen.WriteText("", false);
+					PBscreen.Font = "Monospace";
+					PBkeyboard = ThisProgram.Me.GetSurface(1);
+					PBkeyboard.ContentType = ContentType.TEXT_AND_IMAGE;
+					PBkeyboard.WriteText("", false);
+					PBkeyboard.Font = "Monospace";
+					PBkeyboard.FontSize = 4.5f;
 				}
 
 				Output(things:"Creating RuntimeEnvironment...");
@@ -162,7 +175,7 @@ namespace IngameScript
                     else
                     { Output(things: " OK"); }
 
-					Timings2.Add(job.Key, new JobRuntimeInfo());
+					AverageJobRuntimes.Add(job.Key, new JobRuntimeInfo());
 
 					job.Value.RequeueInterval = SanitizeInterval(job.Value.RequeueInterval);
 					AllowFrequencyChange |= job.Value.AllowFrequencyChange;
@@ -201,6 +214,7 @@ namespace IngameScript
 				{ Commands.Add("toggle", new Command(CMD_toggle, 0, UpdateType.Trigger | UpdateType.Terminal)); }
 				if (AllowFrequencyChange)
 				{ Commands.Add("frequency", new Command(CMD_freq, 1)); }
+				Commands.Add("reset", new Command(CMD_reset, 0, UpdateType.Trigger | UpdateType.Terminal));
 
 				foreach (var command in Commands.Values)
 				{ KnownCommandUpdateTypes |= command.UpdateType; }
@@ -215,7 +229,7 @@ namespace IngameScript
 				StatsStrings[-1] = new CachedObject<string>(() => BuildStatsString(-1));
 				StatsStrings[-2] = new CachedObject<string>(() => BuildStatsString(-2));
 				StatsStrings[-3] = new CachedObject<string>(() => BuildStatsString(-3));
-                Output(EndLine: true, things: "Done!");
+				Output(EndLine: true, things: "Done!");
 
                 if (DisplayState)
 				{
@@ -240,9 +254,16 @@ namespace IngameScript
 			{
                 Output(EndLine:false, things: "Loading..." );
 				if (saveString == null || saveString.Length < SaveStringBegin.Length + SaveStringEnd.Length)
-                { Output(EndLine: true, things: "no valid save"); return false; }
-				int pStart = saveString.IndexOf(SaveStringBegin) + SaveStringBegin.Length;
+				{ Output(EndLine: true, things: "invalid: too short"); return false; }
+
+				int pStart = saveString.IndexOf(SaveStringBegin);
 				int pEnd = saveString.LastIndexOf(SaveJobSeparator + SaveStringEnd);
+				
+				if ( pStart < 0 || pEnd <= 0 )
+				{ Output(true, "invalid: coudlnt find tags ( got ",pStart,",",pEnd,")"); return false; }
+
+				pStart += SaveStringBegin.Length;
+
 				string[] states = saveString.Substring(pStart, pEnd - pStart).Split(SaveJobSeparator);
 
 				foreach( string jobstring in states )
@@ -250,7 +271,7 @@ namespace IngameScript
 					string[] info = jobstring.Split(SaveInfoSeparator);
 					int i = 0;
 					bool active = false;
-                    if (JobNames.Contains(info[0]) && int.TryParse(info[1], out i) && bool.TryParse(info[2], out active))
+                    if ( JobNames.Contains(info[0]) && int.TryParse(info[1], out i ) && bool.TryParse(info[2], out active ) )
                     {
                         Jobs[info[0]].RequeueInterval = i;
                         Jobs[info[0]].active = active;
@@ -294,7 +315,7 @@ namespace IngameScript
 			/// <see cref="RuntimeEnvironment"/>
 			public void Tick(string args, UpdateType updateType, bool execute = true)
 			{
-				if( (updateType & KnownCommandUpdateTypes) != 0 )
+				if( ( updateType & KnownCommandUpdateTypes) != 0 )
 				{ execute &= ParseArgs(args); commanded = 2; }
 
 				if ( (Online && execute ) || EvaluationMode )
@@ -341,6 +362,13 @@ namespace IngameScript
 				TimeSinceLastCall = ThisProgram.Runtime.TimeSinceLastRun.TotalSeconds * 1000 + LastRuntime;
 				ContinousTime += TimeSinceLastCall;
 
+				if ( StoreRT )
+				{
+					WriteOut(ThisProgram.Me.GetSurface(1), null, RTLines++ < RTLinesMax, false, true, LastRuntime.ToString());
+					if (RTLines == RTLinesMax)
+					{ RTLines = 0; }
+				}
+
 				if (EvaluationMode)
 				{
 					if ( EvaluatingState < 0 && RunningJobs.Values.All(x => x == null) )
@@ -353,7 +381,7 @@ namespace IngameScript
 					{
 						if (EvaluationDone)
 						{
-							Timings2[EvaluateJobList[0]].Update();
+							AverageJobRuntimes[EvaluateJobList[0]].Update();
 							EvaluateJobList.RemoveAt(0);
 							EvaluationMode = EvaluateJobList.Any();
 							EvaluatingState = -1;
@@ -362,7 +390,7 @@ namespace IngameScript
 						}
 						else
 						{
-							Timings2[EvaluateJobList[0]].AddParse(EvaluatingState, LastRuntime);
+							AverageJobRuntimes[EvaluateJobList[0]].AddParse(EvaluatingState, LastRuntime);
 							++EvaluatingState;
 							EvaluationDone = RunningJobs[EvaluateJobList[0]] == null;
 						}
@@ -385,11 +413,14 @@ namespace IngameScript
 				if (EchoState)
 				{ Echo(StatsString(-1)); }
 				if (DisplayState && CurrentTick % 10 == 0 )
-				{ WriteOut(ThisProgram.Me.GetSurface(0), l_surf: null, append: false, EchoOnFail: false, things:StatsString(-2)); }
+				{
+					WriteOut(PBscreen, l_surf: null, append: false, EchoOnFail: false, things:StatsString(-2));
+					WriteOut(PBkeyboard, things: TickString() + "\n" + TickString() + "\n" + TickString());
+				}
 
 				SystemInfoList.Invalidate();
 				JobInfoList.Invalidate();
-				for(int i = -3; i < 3; ++i )
+				for(int i = -3; i < 4; ++i )
 				{ StatsStrings[i].Invalidate(); }
 
 				commanded -= commanded > 0 ? 1 : 0;
@@ -400,12 +431,15 @@ namespace IngameScript
 			/// </summary>
 			/// <param name="name">name of the Job</param>
 			/// <param name="state">targetstate. 1 for On, 0 for Off, -1 for toggle</param>
-			public void SetActive(string name = "", int state = -1)
+			public void TrySetActive(string name = null, int state = -1)
 			{
-				if (string.IsNullOrEmpty(name) && state == -1)
+				if (string.IsNullOrEmpty(name))
 				{
-					Online = !Online;
-					Echo(Online ? "starting..." : "pausing...");
+					if ( state == -1)
+					{
+						Online = !Online;
+						Echo(Online ? "starting..." : "pausing...");
+					}
 				}
 				else if (JobNames.Contains(name) && Jobs[name].AllowToggle )
 				{
@@ -413,6 +447,7 @@ namespace IngameScript
 					Jobs[name].active = active;
 					Online |= active;
 				}
+
 				if (Online && !Jobs.Values.Any(x => x.active))
 				{
 					Online = false;
@@ -426,7 +461,7 @@ namespace IngameScript
 			/// </summary>
 			/// <param name="newinterval">new interval. Will be sanatized</param>
 			/// <param name="name">name of the Job. If empty all jobs will be set</param>
-			public void SetInterval(int newinterval, string name = "")
+			public void TrySetInterval(int newinterval, string name = null)
 			{
 				newinterval = SanitizeInterval(newinterval);
 				//update tickrate for jobs
@@ -482,7 +517,7 @@ namespace IngameScript
 				}
 			}
 
-			private void TryRegisterEvaluation(string name)
+			public void TryRegisterEvaluation(string name)
 			{
 				if(JobNames.Contains(name))
 				{
@@ -573,18 +608,18 @@ namespace IngameScript
 			private bool CMD_toggle(MyCommandLine commandLine)
 			{
 				if( commandLine.ArgumentCount == 1 )
-				{ SetActive(); }
+				{ TrySetActive(); }
 				else if( commandLine.ArgumentCount == 2 )
 				{
 					if (commandLine.Argument(1) == "all")
 					{
 						foreach (var name in JobNames)
-						{ SetActive(name); }
+						{ TrySetActive(name); }
 					}
 					else
 					{
 						if( JobNames.Contains(commandLine.Argument(1)) )
-						{ SetActive(commandLine.Argument(1)); }
+						{ TrySetActive(commandLine.Argument(1)); }
 					}
 				}
 				else if (commandLine.ArgumentCount == 3 )
@@ -599,10 +634,10 @@ namespace IngameScript
 						if(commandLine.Argument(1) == "all")
 						{
 							foreach (var name in JobNames)
-							{ SetActive(name, state); }
+							{ TrySetActive(name, state); }
 						}
 						else
-						{ SetActive(commandLine.Argument(1), state); }
+						{ TrySetActive(commandLine.Argument(1), state); }
 					}
 				}
 				return true;
@@ -620,13 +655,13 @@ namespace IngameScript
 			{
 				int i;
 				if (commandLine.ArgumentCount > 1 && int.TryParse(commandLine.Argument(1), out i) )
-				{ SetInterval( i ); }
+				{ TrySetInterval( i ); }
 				else if(commandLine.ArgumentCount > 2 && int.TryParse(commandLine.Argument(2), out i) )
 				{
 					if (commandLine.Argument(1) == "all")
-					{ SetInterval(i); }
+					{ TrySetInterval(i); }
 					else
-					{ SetInterval(i, commandLine.Argument(1)); }
+					{ TrySetInterval(i, commandLine.Argument(1)); }
 				}
 				return true;
 			}
@@ -640,6 +675,24 @@ namespace IngameScript
 				}
 				else
 				{ TryRegisterEvaluation(commandLine.Argument(1)); }
+
+				return true;
+			}
+
+			private bool CMD_reset(MyCommandLine commandLine)
+			{
+				string name = commandLine.Argument(1);
+				if ( name == "all")
+				{
+					foreach (var x in JobNames)
+					{ AverageJobRuntimes[x] = new JobRuntimeInfo(); }
+				}
+				else if ( Jobs.ContainsKey( name ) )
+				{ AverageJobRuntimes[name] = new JobRuntimeInfo(); }
+
+				StatsStrings[3].Invalidate();
+				StatsStrings[-3].Invalidate();
+
 				return true;
 			}
 			#endregion command functions
@@ -653,21 +706,9 @@ namespace IngameScript
 			{
 				if (!Online)
 				{ return "--PAUSED--"; }
-				switch (SymbolTick % 11)
-				{
-					case 0: return "|----------";
-					case 1: return "-|---------";
-					case 2: return "--|--------";
-					case 3: return "---|-------";
-					case 4: return "----|------";
-					case 5: return "-----|-----";
-					case 6: return "------|----";
-					case 7: return "-------|---";
-					case 8: return "--------|--";
-					case 9: return "---------|-";
-                    case 10: return "----------|";
-                    default: return "the static analyzer is stupid";
-				}
+
+				int i = SymbolTick % 11;
+				return new string('-', i) + "|" + new string('-', 11 - i);
 			}
 
 			static public string ListToString(params object[] things)
@@ -710,7 +751,7 @@ namespace IngameScript
 					string.Format( fmtstringLong, "fast", FastTick.ToString() + "/" + FastTickMax.ToString() ),
 					string.Format( fmtstringLong, "Elapsed", (int)TimeSinceLastCall),
 					string.Format( fmtstringLong, " max RT", MaxRunTime),
-					string.Format( fmtstringLong, " avg RT", _AverageRuntime.Value ),
+					string.Format( fmtstringLong, " avg RT", _AverageRuntime.Average ),
 					string.Format( fmtstringLong, "last RT", LastRuntime)
 				};
 			}
@@ -736,15 +777,14 @@ namespace IngameScript
 					case 0:
 					{
 						res = "___ System ___";
-						foreach (var x in SystemInfoList.Get())
+						foreach (var x in SystemInfoList.Value)
 						{ res += "\n" + x; }
 						break;
 					}
 					case 1:
 					{
-						var tmp = JobInfoList.Get();
 						res = "____ Jobs ____";
-						foreach (var x in JobInfoList.Get())
+						foreach (var x in JobInfoList.Value)
 						{ res += "\n" + x; }
 						break;
 					}
@@ -763,14 +803,14 @@ namespace IngameScript
 
 						foreach ( var job in JobNames)
 						{
-							res += string.Format(fmtstringJob, job.Substring(0, Math.Min(job.Length, 6)), Timings2[job].Sum.N);
+							res += string.Format(fmtstringJob, job.Substring(0, Math.Min(job.Length, 6)), AverageJobRuntimes[job].Total.N);
 
-							if (Timings2[job].Any)
+							if (AverageJobRuntimes[job].Any)
 							{
 								string tmp = "";
-								foreach (var t in Timings2[job].StateInfo )
-								{ tmp += string.Format("{0:0.0} ", t.Value); }
-								res += string.Format(fmtstringTime, Timings2[job].Average.Value, Timings2[job].Sum.Value, tmp );
+								foreach (var t in AverageJobRuntimes[job].StateInfo )
+								{ tmp += string.Format("{0:0.0} ", t.Average); }
+								res += string.Format(fmtstringTime, AverageJobRuntimes[job].Average.Average, AverageJobRuntimes[job].Total.Average, tmp );
 							}
 							else
 							{ res += string.Format(fmtstringTime, " ? ", " ? ", " ? "); }
@@ -779,23 +819,23 @@ namespace IngameScript
 					}
 					case -1:
 					{
-						res = StatsStrings[0].Get() + "\n" + StatsStrings[1].Get() + "\n" + StatsStrings[2].Get() + "\n" + StatsStrings[3].Get() + "\n";
+						res = StatsStrings[0].Value + "\n" + StatsStrings[1].Value + "\n" + StatsStrings[2].Value + "\n" + StatsStrings[3].Value + "\n";
 						break;
 					}
 					case -2:
 					{
-						var sys = SystemInfoList.Get();
-						var job = JobInfoList.Get();
+						var sys = SystemInfoList.Value;
+						var job = JobInfoList.Value;
 						res = string.Format("{0,10} {1,1}", "", Online ? "Online" : "Offline") + "\n";
 						res += string.Format("{0,-12} | {1,-1}", "   System", "    Jobs");
 						for (int i = 0; i < Math.Max(sys.Count, job.Count); ++i)
 						{ res += string.Format("\n{0,-12} | {1,-1}", i < sys.Count ? sys[i] : "", i < job.Count ? job[i] : ""); }
-						res += "\n-------------------------------\n" + StatsStrings[2].Get();
+						res += "\n-------------------------------\n" + StatsStrings[2].Value;
 						break;
 					}
 					case -3:
 					{
-						res = StatsStrings[-2].Get() + "\n-------------------------------\n" + StatsStrings[3].Get();
+						res = StatsStrings[-2].Value + "\n-------------------------------\n" + StatsStrings[3].Value;
 						break;
 					}
 					default:
@@ -810,7 +850,7 @@ namespace IngameScript
 			/// <param name="which">which block you want, 0 for system, 1 for jobs, -1 for compact display (monospace LCD), -2 for list (terminal/log)</param>
 			/// <returns>the string you wanted</returns>
 			public string StatsString(int which = -1)
-			{ return StatsStrings[which].Get(); }
+			{ return StatsStrings[which].Value; }
 			#endregion StringHelper
 
 			#region helpers
@@ -838,8 +878,10 @@ namespace IngameScript
 					if (surf != null)
 					{ surf.WriteText(text, append); }
 					if (!badgroup)
-					{ foreach (var s in l_surf)
-						{ s.WriteText(text, append); } }
+					{
+						foreach (var s in l_surf)
+						{ if( s != null ) s.WriteText(text, append); }
+					}
 					if (EchoOnFail && surf == null && badgroup)
 					{ ThisProgram.Echo(text); }
 				}

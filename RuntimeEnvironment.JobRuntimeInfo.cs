@@ -26,8 +26,10 @@ namespace IngameScript
 			{
 				public List<RunningAverage> StateInfo { get; private set; } = new List<RunningAverage>();
 				public RunningAverage Average { get; private set; } = new RunningAverage();
-				public RunningAverage Sum { get; private set; } = new RunningAverage();
-				public bool Any { get; private set; }
+				public RunningAverage Total { get; private set; } = new RunningAverage();
+				public bool Any { get; private set; } = false;
+
+				public int N { get { return StateInfo[0].N; } }
 
 				public void AddParse(int stage, double time)
 				{
@@ -40,8 +42,8 @@ namespace IngameScript
 
 				public void Update()
 				{
-					Average.Set(StateInfo.Average(x => x.Value), StateInfo[0].N);
-					Sum.Set(StateInfo.Sum(x => x.Value), StateInfo[0].N);
+					Average.Set(StateInfo.Average(x => x.Average), N);
+					Total.Set(StateInfo.Sum(x => x.Average), N);
 				}
 			}
 		}
